@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+/motoguard-web/vendor/
+/motoguard-web/node_modules/
+/motoguard-firmware/.pio/
+/motoguard-firmware/include/config.h
+.vscode/
+.idea/
+Thumbs.db
