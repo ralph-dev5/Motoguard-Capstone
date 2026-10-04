@@ -84,6 +84,28 @@ return [
             ]) : [],
         ],
 
+        // Target for the one-off move to a closer Supabase region. Mirrors 'pgsql' but reads
+        // NEW_DB_* so both projects can be open at once during the copy; delete once the move
+        // is done and DB_* points at the new project.
+        'pgsql_new' => [
+            'driver' => 'pgsql',
+            'url' => env('NEW_DB_URL'),
+            'host' => env('NEW_DB_HOST', '127.0.0.1'),
+            'port' => env('NEW_DB_PORT', '5432'),
+            'database' => env('NEW_DB_DATABASE', 'postgres'),
+            'username' => env('NEW_DB_USERNAME', 'postgres'),
+            'password' => env('NEW_DB_PASSWORD', ''),
+            'charset' => env('DB_CHARSET', 'utf8'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => env('DB_SEARCH_PATH'),
+            'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'options' => [
+                PDO::ATTR_PERSISTENT => false,
+                PDO::ATTR_EMULATE_PREPARES => true,
+            ],
+        ],
+
         'pgsql' => [
             'driver' => 'pgsql',
             'url' => env('DB_URL'),
@@ -99,6 +121,12 @@ return [
             // while db:wipe / RefreshDatabase only touch "public" and never PostGIS's own views.
             'search_path' => env('DB_SEARCH_PATH'),
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            // Reusing the TLS connection to Supabase saves ~2 s per request; Laravel reconnects if the pooler drops it.
+            // Emulated prepares send each query in one round trip instead of three (prepare, execute, deallocate).
+            'options' => [
+                PDO::ATTR_PERSISTENT => (bool) env('DB_PERSISTENT', false),
+                PDO::ATTR_EMULATE_PREPARES => true,
+            ],
         ],
 
         'sqlsrv' => [

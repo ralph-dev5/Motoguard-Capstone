@@ -2,11 +2,14 @@
 
 namespace App\Providers;
 
+use App\Broadcasting\ResilientPusherBroadcaster;
 use App\Contracts\SmsGateway;
 use App\Services\Sms\LogSmsGateway;
 use App\Services\Sms\SemaphoreSmsGateway;
 use Carbon\CarbonImmutable;
+use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Database\Events\MigrationsEnded;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -36,6 +39,12 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureDefaults();
         $this->lockSupabaseDataApi();
+
+        // Reverb speaks the Pusher protocol; this is the stock driver, minus failing the request when it is down.
+        Broadcast::extend('reverb', function ($app, array $config) {
+            /** @var BroadcastManager $this */
+            return new ResilientPusherBroadcaster($this->pusher($config));
+        });
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Device;
 
+use App\Enums\AlertLevel;
 use App\Enums\AlertType;
 use App\Http\Requests\Device\Concerns\InteractsWithDevice;
 use Illuminate\Contracts\Validation\ValidationRule;
@@ -20,6 +21,7 @@ class StoreAlertRequest extends FormRequest
         return [
             // Geofence exits are detected by the server, never reported by the device.
             'type' => ['required', Rule::enum(AlertType::class)->except([AlertType::GeofenceExit])],
+            'level' => ['nullable', Rule::enum(AlertLevel::class)],
             'lat' => ['nullable', 'required_with:lng', 'numeric', 'between:-90,90'],
             'lng' => ['nullable', 'required_with:lat', 'numeric', 'between:-180,180'],
             'sms_sent' => ['required', 'boolean'],

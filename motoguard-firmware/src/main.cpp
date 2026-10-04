@@ -2,10 +2,16 @@
 #include <Preferences.h>
 
 #include "api.h"
+#include "buzzer.h"
+#include "calibration.h"
 #include "config.h"
 #include "gps.h"
 #include "modem.h"
 #include "motion.h"
+#include "owner.h"
+#include "thresholds.h"
+#include "settings.h"
+#include "threat.h"
 
 enum class State { Disarmed, Armed, Alert };
 
@@ -13,8 +19,12 @@ static State state = State::Armed;
 static Preferences prefs;
 static bool motionReady = false;
 
-static unsigned long alertStartedMs = 0;
 static unsigned long lastHeartbeatMs = 0;
+static unsigned long lastPingMs = 0;
+static int pingFailures = 0;
+static unsigned long serverLostSinceMs = 0;
+static String lastNetwork;
+static unsigned long lastGpsStatusMs = 0;
 static unsigned long lastLocationMs = 0;
 static unsigned long lastBatteryCheckMs = 0;
 static unsigned long lastSmsMs = 0;
@@ -32,16 +42,64 @@ static const char* stateName(State s) {
     return "?";
 }
 
+// Lowercase form the device API expects in the heartbeat payload.
+static const char* stateApiName(State s) {
+    switch (s) {
+        case State::Disarmed: return "disarmed";
+        case State::Armed: return "armed";
+        case State::Alert: return "alert";
+    }
+    return "armed";
+}
+
 static void setState(State next) {
     if (state == next) {
         return;
     }
     Serial.printf("[state] %s -> %s\n", stateName(state), stateName(next));
     state = next;
-    digitalWrite(PIN_BUZZER, LOW);
+    threatSetArmed(next != State::Disarmed);
+    if (next != State::Alert) {
+        buzzerStop();
+    }
+    if (next == State::Alert) {
+        lastLocationMs = 0;             // start tracking at the fast interval right away
+    }
 
     if (next == State::Armed && motionReady) {
         motionCalibrate();
+    }
+}
+
+// While a calibration runs the bike must be still, so its samples measure noise instead of
+// feeding the classifier (which would alarm at the owner's own hand walking away).
+static void onMotionSample(const MotionSample& sample) {
+    if (calibrationActive()) {
+        calibrationFeed(sample);
+        return;
+    }
+    threatOnSample(sample);
+}
+
+// A finished calibration waits here until the server has it, so a dropped request is retried
+// instead of leaving the dashboard showing "waiting" forever.
+static CalibrationResult pendingCalibration;
+static bool calibrationUnsent = false;
+static unsigned long lastCalibrationSendMs = 0;
+
+static void serviceCalibration(unsigned long now) {
+    CalibrationResult result;
+    if (calibrationFinished(result)) {
+        prefs.putFloat("calJerk", result.joltThreshold);
+        prefs.putFloat("calPush", result.pushAccel);
+        prefs.putFloat("calRumble", result.pushRumble);
+        pendingCalibration = result;
+        calibrationUnsent = true;
+        lastCalibrationSendMs = 0;
+    }
+    if (calibrationUnsent && (lastCalibrationSendMs == 0 || now - lastCalibrationSendMs >= 10000)) {
+        lastCalibrationSendMs = now;
+        calibrationUnsent = !apiSendCalibration(pendingCalibration);
     }
 }
 
@@ -52,16 +110,58 @@ static void applyArmed(bool armed) {
 
     if (!armed) {
         setState(State::Disarmed);
-    } else if (state == State::Disarmed) {
+    } else if (state == State::Disarmed && !ownerNearby()) {
         setState(State::Armed);
     }
 }
 
-static void raiseAlert(const char* type, const String& reason) {
-    GpsFix fix = gpsFix();
-    bool ownerNotified;
+static void applyOwnerBeacon(const String& key) {
+    if (prefs.getString("ownerKey", "") == key) {
+        return;
+    }
+    prefs.putString("ownerKey", key);
+    ownerSetKey(key);
+}
 
-    if (smsEverSent && millis() - lastSmsMs < SMS_COOLDOWN_MS) {
+// While the owner's phone is in Bluetooth range the device stands down: no motion alarms, and an
+// alarm already sounding stops. It is not the dashboard's arm switch - that stays as the owner set
+// it - so walking away re-arms on its own.
+static bool ownerWasNearby = false;
+
+static void checkOwner() {
+    bool nearby = ownerNearby();
+    if (nearby == ownerWasNearby) {
+        return;
+    }
+    ownerWasNearby = nearby;
+    lastHeartbeatMs = 0;  // tell the dashboard now rather than at the next 30 s heartbeat
+
+    if (nearby) {
+        Serial.printf("[owner] owner nearby (RSSI %d) - alarms held off\n", ownerRssi());
+        if (state != State::Disarmed) {
+            setState(State::Disarmed);
+            buzzerBeep(1);
+        }
+    } else {
+        Serial.println("[owner] owner gone - re-arming");
+        if (prefs.getBool("armed", true) && state == State::Disarmed) {
+            setState(State::Armed);
+            buzzerBeep(2);
+        }
+    }
+}
+
+// Only a theft attempt (or a non-motion alert such as a power cut) texts the owner; minor and
+// suspicious episodes are for the dashboard, which is how classification cuts false alarms.
+static void raiseAlert(const char* type, ThreatLevel level, const String& reason,
+                       const ThreatReport* evidence = nullptr) {
+    GpsFix fix = gpsFix();
+    bool ownerNotified = false;
+    bool textOwner = level == ThreatLevel::None || level == ThreatLevel::TheftAttempt;
+
+    if (!textOwner) {
+        // Nothing to send, and reporting false keeps the server from texting either.
+    } else if (smsEverSent && millis() - lastSmsMs < SMS_COOLDOWN_MS) {
         // The owner was texted moments ago; report it as handled so the server doesn't text again.
         ownerNotified = true;
     } else {
@@ -77,8 +177,30 @@ static void raiseAlert(const char* type, const String& reason) {
         }
     }
 
-    MotionReading reading = motionLastReading();
-    apiSendAlert(type, fix, ownerNotified, reading.accelDelta, reading.tiltDeg);
+    apiSendAlert(type, threatLevelApiName(level), fix, ownerNotified, evidence);
+}
+
+static void reportThreat(const ThreatReport& report) {
+    Serial.printf("[alarm] %s: %s (knocks %u, jolts %u, max tilt %.1f deg, %lu ms)\n",
+                  threatLevelApiName(report.level), report.type, report.knocks, report.jolts,
+                  (double) report.maxTiltDeg, (unsigned long) report.durationMs);
+
+    // The SMS says what actually happened, so the owner knows how urgent it is before opening the map.
+    const char* what = strcmp(report.type, "movement") == 0 ? "moved or tampered with" : "touched or bumped";
+
+    char reason[96];
+    switch (report.level) {
+        case ThreatLevel::TheftAttempt:
+            snprintf(reason, sizeof(reason), "Possible theft attempt - your motorcycle is being %s", what);
+            break;
+        case ThreatLevel::Suspicious:
+            snprintf(reason, sizeof(reason), "Suspicious activity - your motorcycle was %s", what);
+            break;
+        default:
+            snprintf(reason, sizeof(reason), "Minor - your motorcycle was %s", what);
+            break;
+    }
+    raiseAlert(report.type, report.level, reason, &report);
 }
 
 static float readBatteryVolts() {
@@ -100,7 +222,8 @@ static void checkBattery(unsigned long now) {
     if (batteryVolts < POWER_CUT_VOLTS) {
         if (!powerCutReported && state != State::Disarmed) {
             powerCutReported = true;
-            raiseAlert("power_cut", "Motorcycle battery was disconnected");
+            buzzerBeep(BUZZER_ALERT_BEEPS);
+            raiseAlert("power_cut", ThreatLevel::TheftAttempt, "Motorcycle battery was disconnected");
         }
         return;
     }
@@ -108,7 +231,7 @@ static void checkBattery(unsigned long now) {
 
     if (batteryVolts < LOW_BATTERY_VOLTS && !lowBatteryReported) {
         lowBatteryReported = true;
-        raiseAlert("low_battery", "Motorcycle battery is low (" + String(batteryVolts, 1) + " V)");
+        raiseAlert("low_battery", ThreatLevel::None, "Motorcycle battery is low (" + String(batteryVolts, 1) + " V)");
     } else if (batteryVolts > LOW_BATTERY_VOLTS + 0.3f) {
         lowBatteryReported = false;
     }
@@ -120,64 +243,207 @@ void setup() {
     delay(200);
     Serial.println("\nMotoGuard+ starting");
 
-    pinMode(PIN_BUZZER, OUTPUT);
-    digitalWrite(PIN_BUZZER, LOW);
+    Serial.println("[threat] movement classification: minor / suspicious / theft attempt");
+    buzzerBegin();
+    threatBegin();
 
     prefs.begin("motoguard", false);
     bool armed = prefs.getBool("armed", true);
+    if (prefs.isKey("calJerk")) {
+        // Clamped again on load, so tightening the limits in config.h applies to a unit that was
+        // calibrated before the change without calibrating it again.
+        thresholdsSet(
+            constrain(prefs.getFloat("calJerk", MOTION_JERK_THRESHOLD), CALIBRATION_MIN_JERK, CALIBRATION_MAX_JERK),
+            constrain(prefs.getFloat("calPush", MOTION_PUSH_ACCEL), CALIBRATION_MIN_PUSH_ACCEL, CALIBRATION_MAX_PUSH_ACCEL),
+            constrain(prefs.getFloat("calRumble", MOTION_PUSH_RUMBLE), CALIBRATION_MIN_PUSH_RUMBLE, CALIBRATION_MAX_PUSH_RUMBLE));
+        Serial.printf("[motion] calibrated thresholds: jolt %.2f, push %.2f / %.2f m/s^2\n",
+                      (double) thresholdJerk(), (double) thresholdPushAccel(),
+                      (double) thresholdPushRumble());
+    }
 
     gpsBegin();
 
     motionReady = motionBegin();
-    if (!motionReady) {
-        Serial.println("[motion] MPU6050 not found, check the SDA/SCL wiring");
-    }
 
+    settingsBegin();
     netBegin();
 
+    ownerBegin();
+    ownerSetKey(prefs.getString("ownerKey", ""));
+
     state = armed ? State::Armed : State::Disarmed;
-    if (armed && motionReady) {
+    threatSetArmed(armed);
+    if (motionReady) {
+        // Calibrate even when disarmed: the task starts sampling now, and a zero baseline would
+        // read as a huge tilt the moment the owner arms it.
         motionCalibrate();
+        motionStart(onMotionSample);
     }
     Serial.printf("[state] %s\n", stateName(state));
 }
 
+
+/**
+ * Periodic GPS health line. The module is otherwise completely silent, so without this a
+ * backwards TX/RX pair and a cold start under a roof produce exactly the same symptom: nothing.
+ * Bytes arriving proves the serial link; satellites without a fix means sky, not wiring.
+ */
+static void reportGps(unsigned long now) {
+    if (lastGpsStatusMs != 0 && now - lastGpsStatusMs < GPS_STATUS_INTERVAL_MS) {
+        return;
+    }
+    lastGpsStatusMs = now;
+
+    GpsHealth health = gpsHealth();
+
+    if (health.hasFix) {
+        GpsFix fix = gpsFix();
+        Serial.printf("[gps] %s %.6f, %.6f - %d of %d satellites, HDOP %.1f\n",
+                      fix.accurate ? "fix" : "rough fix",
+                      fix.lat, fix.lng, health.satellitesInUse, health.satellitesInView,
+                      (double) fix.hdop);
+        if (!fix.accurate) {
+            Serial.printf("      not trusted yet: needs %d satellites and HDOP under %.1f\n",
+                          GPS_MIN_SATELLITES, (double) GPS_MAX_HDOP);
+        }
+        return;
+    }
+
+    if (health.bytes == 0) {
+        Serial.println("[gps] no data - check TX->GPIO26, RX->GPIO27 and 9600 baud");
+        return;
+    }
+
+    if (health.satellitesInView == 0) {
+        Serial.printf("[gps] no lock - 0 satellites in view, %lu bytes, %lu bad checksums, HDOP %.1f\n"
+                      "      the receiver is talking but has not locked on: it needs a clear view of the sky.\n"
+                      "      note that some modules never send GSV, so 0 in view can also mean 'not reported'\n",
+                      health.bytes, health.checksumErrors, (double) health.hdop);
+        return;
+    }
+
+    Serial.printf("[gps] acquiring - %d satellites in view, needs %d to fix (%lu bytes, HDOP %.1f)\n",
+                  health.satellitesInView, GPS_MIN_SATELLITES, health.bytes, (double) health.hdop);
+}
+
+/**
+ * A pairing code typed into the setup page is traded for the device token on first contact with
+ * the server. Retried every 10 s until the server answers; a rejected code is dropped.
+ */
+static void servicePairing(unsigned long now) {
+    static unsigned long lastTryMs = 0;
+    if (settingsPairCode().length() == 0 || (lastTryMs != 0 && now - lastTryMs < 10000)) {
+        return;
+    }
+    lastTryMs = now;
+
+    switch (apiPair(settingsPairCode())) {
+        case PairResult::Paired:
+            Serial.println("[pair] Paired with the dashboard");
+            buzzerBeep(2);
+            break;
+        case PairResult::Rejected:
+            Serial.println("[pair] Code rejected (wrong or expired). Get a new one from the dashboard and enter it again.");
+            settingsDropPairCode();
+            break;
+        case PairResult::Unreachable:
+            Serial.println("[pair] Server not reachable yet, retrying in 10 s");
+            break;
+    }
+}
+
 void loop() {
     unsigned long now = millis();
+    serviceCalibration(now);
+    servicePairing(now);
 
+    netUpdate();
     gpsUpdate();
+    reportGps(now);
 
     if (motionReady) {
-        MotionEvent event = motionUpdate();
+        // The classifier runs in the motion task and has already sounded the buzzer; this side
+        // only does the slow part - the network - and mirrors the level into the device state.
+        ThreatReport report;
+        while (threatNextReport(report)) {
+            reportThreat(report);
+        }
 
-        if (state == State::Armed && event != MotionEvent::None) {
-            setState(State::Alert);
-            alertStartedMs = now;
-            lastLocationMs = 0;
+        if (state != State::Disarmed) {
+            setState(threatLevel() >= ThreatLevel::Suspicious ? State::Alert : State::Armed);
+        }
+    }
 
-            if (event == MotionEvent::Tilt) {
-                raiseAlert("tilt", "Your motorcycle was tilted or taken off its stand");
-            } else {
-                raiseAlert("movement", "Unauthorized movement detected");
+    checkOwner();
+    checkBattery(now);
+
+    // The server announces itself every 2 s. Hearing it while the pings are failing means it has
+    // just come up (or moved): report in at once instead of waiting out the retry timers.
+    bool serverMoved = false;
+    if (netDiscoverPoll(serverMoved) && (serverMoved || pingFailures > 0)) {
+        Serial.println("[discover] Server is announcing - reporting in now");
+        pingFailures = 0;
+        serverLostSinceMs = 0;
+        lastPingMs = 0;
+        lastHeartbeatMs = 0;
+    }
+
+    // Presence first: the badge depends on this landing on time, and it is far cheaper than the
+    // heartbeat below, which writes to a database in another region.
+    if (lastPingMs == 0 || now - lastPingMs >= PRESENCE_PING_INTERVAL_MS) {
+        lastPingMs = now;
+        bool syncRequested = false;
+        pingFailures = apiPing(syncRequested) ? 0 : pingFailures + 1;
+        // Armed or disarmed on the dashboard: fetch it now instead of at the next 30 s heartbeat.
+        // Throttled, so a heartbeat that fails cannot turn every 1 s ping into another one.
+        if (syncRequested && now - lastHeartbeatMs >= 3000) {
+            lastHeartbeatMs = 0;
+        }
+
+        // Joined a different network, or the server stopped answering (the PC changed IP): listen
+        // for the server's announcement and follow it. Throttled, because listening blocks the loop.
+        String network = netNetworkName();
+        bool newNetwork = network.length() > 0 && network != lastNetwork;
+        if (network.length() > 0) {
+            lastNetwork = network;
+        }
+        if (newNetwork) {
+            Serial.printf("[discover] Listening for the server on UDP %d\n", DISCOVERY_PORT);
+        }
+
+        // Connected, but the server is on another network (the laptop moved to the phone hotspot
+        // while home WiFi is still in range): after a while, go and look for it on the other one.
+        if (pingFailures == 0) {
+            serverLostSinceMs = 0;
+        } else if (serverLostSinceMs == 0) {
+            serverLostSinceMs = now;
+        } else if (now - serverLostSinceMs >= SERVER_LOST_SWITCH_MS) {
+            serverLostSinceMs = now;
+            if (network.length() > 0) {
+                Serial.println("[net] Server unreachable on this network, trying the other one");
+                netSwitchNetwork();
             }
         }
-
-        if (state == State::Alert && now - max(alertStartedMs, motionLastActivityMs()) > ALERT_QUIET_RESET_MS) {
-            setState(State::Armed);
-        }
+        // The ping blocks for as long as the server takes to answer, and the UART has been filling
+        // the whole time. Drain it here rather than waiting for the next pass, so the heartbeat
+        // below reports the position the receiver has now and not the one from before the stall.
+        gpsUpdate();
     }
-
-    if (state == State::Alert) {
-        digitalWrite(PIN_BUZZER, (now / 500) % 2 == 0 ? HIGH : LOW);
-    }
-
-    checkBattery(now);
 
     if (lastHeartbeatMs == 0 || now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
         lastHeartbeatMs = now;
-        HeartbeatResult heartbeat = apiHeartbeat(batteryVolts, gpsFix());
+        HeartbeatResult heartbeat = apiHeartbeat(stateApiName(state), batteryVolts, gpsFix(), ownerNearby());
         if (heartbeat.ok) {
+            if (heartbeat.hasBackupWifi) {
+                netSetBackupWifi(heartbeat.backupSsid, heartbeat.backupPass);
+            }
+            if (heartbeat.hasOwnerBeacon) {
+                applyOwnerBeacon(heartbeat.ownerBeacon);
+            }
             applyArmed(heartbeat.armed);
+            if (heartbeat.calibrate && motionReady && !calibrationActive() && !calibrationUnsent) {
+                calibrationStart();
+            }
         }
     }
 

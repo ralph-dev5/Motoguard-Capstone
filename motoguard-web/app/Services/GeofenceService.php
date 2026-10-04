@@ -11,9 +11,9 @@ class GeofenceService
     public function isOutside(Device $device, GeoPoint $point): bool
     {
         $center = $device->safe_zone_center;
-        $radius = $device->safe_zone_radius_m;
+        $radius = $device->parkingRadius();
 
-        if ($center === null || $radius === null) {
+        if ($center === null) {
             return false;
         }
 

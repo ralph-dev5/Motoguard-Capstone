@@ -22,6 +22,16 @@ export default defineConfig({
     ]),
     server: {
         cors: true,
+        // Listen on every interface so the dev server is reachable over IPv4 as well as IPv6
+        // (it otherwise binds [::1] only), but advertise localhost in public/hot: browsers
+        // cannot reliably load assets from 0.0.0.0.
+        host: '0.0.0.0',
+        port: 5173,
+        strictPort: true,
+        origin: 'http://localhost:5173',
+        hmr: {
+            host: 'localhost',
+        },
         watch: {
             ignored: [
                 '**/.agents/**',

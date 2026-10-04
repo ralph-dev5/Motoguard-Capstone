@@ -64,3 +64,50 @@ select:focus[data-flux-control] {
 /* \[:where(&)\]:size-4 {
     @apply size-4;
 } */
+
+/* Alpine hides these until it boots, so server-rendered markup does not flash the wrong state. */
+[x-cloak] {
+    display: none !important;
+}
+
+/* Age of a map pin whose position is no longer being confirmed by the receiver. Muted rather
+   than alarming: the position may still be correct, it is just not current. */
+.moto-stale-note {
+    margin-top: 0.125rem;
+    font-style: italic;
+    opacity: 0.75;
+}
+
+/* 3D map: the motorcycle's live position, a solid dot with a slow ring pulsing out of it. */
+.moto-3d-marker {
+    position: relative;
+    width: 22px;
+    height: 22px;
+}
+
+.moto-3d-dot,
+.moto-3d-pulse {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: var(--moto-color, #898781);
+}
+
+.moto-3d-dot {
+    border: 3px solid #ffffff;
+    box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
+}
+
+.moto-3d-pulse {
+    opacity: 0.45;
+    animation: moto-3d-pulse 2s ease-out infinite;
+}
+
+@keyframes moto-3d-pulse {
+    from { transform: scale(1); opacity: 0.45; }
+    to { transform: scale(3); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moto-3d-pulse { animation: none; opacity: 0; }
+}

@@ -10,6 +10,33 @@ const STATUS = {
     offline: { color: '#898781', label: 'Offline' },
 };
 
+// "5 minutes ago" for a pin whose age is the whole point. Intl handles the pluralising and the
+// wording; falling back to the raw timestamp matters because a fix from a GPS with no date yet
+// can arrive unparseable.
+function timeAgo(iso) {
+    const then = Date.parse(iso);
+    if (Number.isNaN(then)) {
+        return null;
+    }
+
+    const seconds = Math.round((then - Date.now()) / 1000);
+    const units = [
+        ['day', 86400],
+        ['hour', 3600],
+        ['minute', 60],
+        ['second', 1],
+    ];
+    const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+
+    for (const [unit, size] of units) {
+        if (Math.abs(seconds) >= size || unit === 'second') {
+            return relative.format(Math.round(seconds / size), unit);
+        }
+    }
+
+    return null;
+}
+
 function deviceLabel(device) {
     const status = STATUS[device.status] ?? STATUS.offline;
     const root = document.createElement('div');
@@ -17,11 +44,26 @@ function deviceLabel(device) {
     const meta = document.createElement('div');
 
     name.textContent = device.name;
-    meta.textContent = [device.plate_number, status.label, device.is_armed ? 'Armed' : 'Disarmed']
+    meta.textContent = [device.plate_number, status.label, device.arm_label ?? (device.is_armed ? 'Armed' : 'Disarmed')]
         .filter(Boolean)
         .join(' · ');
 
     root.append(name, meta);
+
+    // Without this the pin reads as "here it is now" no matter how old the position is, which is
+    // the one thing a tracker must never imply: the bike could have been moved days ago.
+    if (device.location && device.location_is_live === false) {
+        const stale = document.createElement('div');
+        const when = device.location_at ? timeAgo(device.location_at) : null;
+
+        stale.className = 'moto-stale-note';
+        stale.textContent = when
+            ? `Last known position · ${when}`
+            : 'Last known position · GPS has no lock';
+
+        root.append(stale);
+    }
+
     return root;
 }
 
@@ -30,6 +72,7 @@ function motoMap(config) {
     let map = null;
     let routeLine = null;
     let zoneCircle = null;
+    let resizeObserver = null;
     const markers = new Map();
     const subscriptions = [];
 
@@ -40,14 +83,23 @@ function motoMap(config) {
 
         const latLng = [device.location.lat, device.location.lng];
         const fillColor = (STATUS[device.status] ?? STATUS.offline).color;
+        // A stale pin is drawn hollow and dashed so it is distinguishable from a live one at a
+        // glance, without having to hover for the tooltip.
+        const stale = device.location_is_live === false;
+        const style = {
+            fillColor,
+            fillOpacity: stale ? 0.15 : 1,
+            color: stale ? fillColor : '#ffffff',
+            dashArray: stale ? '3 3' : null,
+        };
         const existing = markers.get(device.id);
 
         if (existing) {
-            existing.setLatLng(latLng).setStyle({ fillColor }).setTooltipContent(deviceLabel(device));
+            existing.setLatLng(latLng).setStyle(style).setTooltipContent(deviceLabel(device));
             return;
         }
 
-        const marker = L.circleMarker(latLng, { radius: 9, weight: 3, color: '#ffffff', fillColor, fillOpacity: 1 })
+        const marker = L.circleMarker(latLng, { radius: 9, weight: 3, ...style })
             .bindTooltip(deviceLabel(device))
             .addTo(map);
 
@@ -123,7 +175,10 @@ function motoMap(config) {
                 drawZone(config.zone);
             }
             fitToContent();
-            requestAnimationFrame(() => map.invalidateSize());
+
+            // The container is measured before the sidebar layout settles; keep Leaflet in sync with its real size.
+            resizeObserver = new ResizeObserver(() => map.invalidateSize());
+            resizeObserver.observe(this.$el);
 
             if (config.editableZone) {
                 map.on('click', (event) => {
@@ -165,6 +220,7 @@ function motoMap(config) {
         },
 
         destroy() {
+            resizeObserver?.disconnect();
             subscriptions.forEach(([channel, event, callback]) => channel.stopListening(event, callback));
             map?.remove();
         },

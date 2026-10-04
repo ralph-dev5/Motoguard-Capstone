@@ -1,0 +1,62 @@
+# Render Blueprint for the MotoGuard+ web app. Secrets (sync: false) are typed into Render's
+# dashboard when the service is created; they are never stored in this repository.
+services:
+  - type: web
+    name: motoguard
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./motoguard-web/Dockerfile
+    dockerContext: ./motoguard-web
+    healthCheckPath: /up
+    branch: deploy
+    autoDeploy: true
+    envVars:
+      - key: APP_NAME
+        value: MotoGuard+
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: APP_KEY
+        sync: false
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_DATABASE
+        value: postgres
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: SESSION_DRIVER
+        value: cookie
+      - key: CACHE_STORE
+        value: file
+      - key: QUEUE_CONNECTION
+        value: database
+      - key: RUN_QUEUE_WORKER
+        value: "false"
+      - key: BROADCAST_CONNECTION
+        value: reverb
+      - key: REVERB_APP_ID
+        sync: false
+      - key: REVERB_APP_KEY
+        sync: false
+      - key: REVERB_APP_SECRET
+        sync: false
+      - key: REVERB_HOST
+        value: 127.0.0.1
+      - key: REVERB_PORT
+        value: "8080"
+      - key: REVERB_SCHEME
+        value: http
+      - key: SMS_DRIVER
+        value: log
+      - key: PRESENCE_OFFLINE_AFTER
+        value: "20"

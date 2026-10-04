@@ -91,7 +91,7 @@ new #[Title('Devices')] class extends Component {
         </flux:modal.trigger>
     </div>
 
-    <div class="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-700">
+    <div class="relative overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-700">
         <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
             <thead class="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                 <tr>
@@ -112,16 +112,37 @@ new #[Title('Devices')] class extends Component {
                         </td>
                         <td class="px-4 py-3 font-mono text-xs">{{ $device->serial }}</td>
                         <td class="px-4 py-3">{{ $device->owner_phone }}</td>
-                        <td class="px-4 py-3"><flux:badge size="sm" :color="$device->status->color()">{{ $device->status->label() }}</flux:badge></td>
-                        <td class="px-4 py-3 tabular-nums">{{ $device->open_alerts_count }}</td>
+                        <td class="px-4 py-3">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                                <x-device-status :device="$device" size="sm" wire:key="presence-{{ $device->id }}" />
+                                <flux:badge size="sm" :color="$device->armState()->color()" :icon="$device->armState()->icon()">{{ __($device->armState()->label()) }}</flux:badge>
+                            </div>
+                        </td>
+                        <td class="px-4 py-3">
+                            @if ($device->open_alerts_count > 0)
+                                <a href="{{ route('alerts.index', ['device' => $device->id, 'state' => 'open']) }}" wire:navigate>
+                                    <flux:badge size="sm" color="red" icon="exclamation-triangle">{{ number_format($device->open_alerts_count) }}</flux:badge>
+                                </a>
+                            @else
+                                <span class="text-zinc-500 dark:text-zinc-400">{{ __('None') }}</span>
+                            @endif
+                        </td>
                         <td class="px-4 py-3">
                             <div class="flex justify-end gap-2">
-                                <flux:button size="sm" wire:click="regenerateToken({{ $device->id }})" wire:confirm="{{ __('The ESP32 will stop reporting until you flash the new token. Continue?') }}">
-                                    {{ __('New token') }}
-                                </flux:button>
-                                <flux:button size="sm" variant="danger" wire:click="deleteDevice({{ $device->id }})" wire:confirm="{{ __('Remove this device with all its alerts and GPS history?') }}">
-                                    {{ __('Remove') }}
-                                </flux:button>
+                                <flux:button size="sm" :href="route('devices.show', $device)" wire:navigate>{{ __('Open') }}</flux:button>
+                                {{-- Rare and destructive actions live behind a menu so they are never one stray click away. --}}
+                                <flux:dropdown position="bottom" align="end">
+                                    <flux:button size="sm" variant="ghost" icon="ellipsis-horizontal" :aria-label="__('More actions')" />
+                                    <flux:menu>
+                                        <flux:menu.item icon="key" wire:click="regenerateToken({{ $device->id }})" wire:confirm="{{ __('The ESP32 will stop reporting until you flash the new token. Continue?') }}">
+                                            {{ __('New device token') }}
+                                        </flux:menu.item>
+                                        <flux:menu.separator />
+                                        <flux:menu.item icon="trash" variant="danger" wire:click="deleteDevice({{ $device->id }})" wire:confirm="{{ __('Remove this device with all its alerts and GPS history?') }}">
+                                            {{ __('Remove device') }}
+                                        </flux:menu.item>
+                                    </flux:menu>
+                                </flux:dropdown>
                             </div>
                         </td>
                     </tr>

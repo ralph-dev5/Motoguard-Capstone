@@ -18,7 +18,21 @@
                     <flux:sidebar.item icon="map-pin" :href="route('devices.index')" :current="request()->routeIs('devices.*')" wire:navigate>
                         {{ __('Devices') }}
                     </flux:sidebar.item>
-                    <flux:sidebar.item icon="bell-alert" :href="route('alerts.index')" :current="request()->routeIs('alerts.*')" wire:navigate>
+                    @php
+                        // Shown on every page so a new alert is never more than a glance away.
+                        $openAlerts = \App\Models\Alert::query()
+                            ->whereIn('device_id', auth()->user()->devices()->select('id'))
+                            ->unacknowledged()
+                            ->count();
+                    @endphp
+                    <flux:sidebar.item
+                        icon="bell-alert"
+                        :href="route('alerts.index', $openAlerts ? ['state' => 'open'] : [])"
+                        :current="request()->routeIs('alerts.*')"
+                        :badge="$openAlerts ? ($openAlerts > 99 ? '99+' : $openAlerts) : null"
+                        :badge:color="$openAlerts ? 'red' : null"
+                        wire:navigate
+                    >
                         {{ __('Alerts') }}
                     </flux:sidebar.item>
                 </flux:sidebar.group>

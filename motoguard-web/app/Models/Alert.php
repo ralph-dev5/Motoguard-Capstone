@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Casts\AsGeoPoint;
+use App\Enums\AlertLevel;
 use App\Enums\AlertType;
 use App\Support\GeoPoint;
 use Carbon\CarbonImmutable;
@@ -18,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $id
  * @property int $device_id
  * @property AlertType $type
+ * @property AlertLevel|null $level
  * @property GeoPoint|null $location
  * @property array<string, mixed>|null $payload
  * @property bool $sms_sent
@@ -26,7 +28,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property CarbonImmutable|null $updated_at
  * @property-read Device $device
  */
-#[Fillable(['type', 'location', 'payload', 'sms_sent', 'acknowledged_at'])]
+#[Fillable(['type', 'level', 'location', 'payload', 'sms_sent', 'acknowledged_at'])]
 class Alert extends Model
 {
     /** @use HasFactory<AlertFactory> */
@@ -39,6 +41,7 @@ class Alert extends Model
     {
         return [
             'type' => AlertType::class,
+            'level' => AlertLevel::class,
             'location' => AsGeoPoint::class,
             'payload' => 'array',
             'sms_sent' => 'boolean',
@@ -67,7 +70,9 @@ class Alert extends Model
     {
         $where = $this->location?->mapsUrl() ?? 'GPS location not available yet.';
 
-        return "MotoGuard+ ALERT: {$this->type->label()} on {$this->device->name}. {$where}";
+        $what = $this->level ? "{$this->level->label()} - {$this->type->label()}" : $this->type->label();
+
+        return "MotoGuard+ ALERT: {$what} on {$this->device->name}. {$where}";
     }
 
     /**
@@ -78,7 +83,8 @@ class Alert extends Model
         return [
             'id' => $this->id,
             'type' => $this->type->value,
-            'label' => $this->type->label(),
+            'label' => $this->level ? "{$this->level->label()}: {$this->type->label()}" : $this->type->label(),
+            'level' => $this->level?->value,
             'device_id' => $this->device_id,
             'device_name' => $this->device->name,
             'location' => $this->location?->toArray(),

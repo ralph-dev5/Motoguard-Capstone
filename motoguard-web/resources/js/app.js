@@ -6,3 +6,5 @@
 
 import './echo';
 import './map';
+import './map3d';
+import './presence';

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\AlertLevel;
 use App\Enums\AlertType;
 use App\Models\Device;
 use App\Support\GeoPoint;
@@ -28,7 +29,8 @@ class SimulateDevice extends Command
 
         // A separate token, so the real firmware token keeps working.
         $token = $device->createToken('simulator', [Device::TOKEN_ABILITY]);
-        $http = fn (): PendingRequest => Http::withToken($token->plainTextToken)->acceptJson()->timeout(15);
+        // `php artisan serve` handles one request at a time, so wait behind open dashboard tabs instead of failing.
+        $http = fn (): PendingRequest => Http::withToken($token->plainTextToken)->acceptJson()->timeout(60);
 
         $start = $device->safe_zone_center ?? $device->last_location ?? new GeoPoint(14.5995, 120.9842);
         $lat = $start->lat;
@@ -37,19 +39,20 @@ class SimulateDevice extends Command
         try {
             $this->info("Simulating {$device->name} against {$base}");
 
-            $beat = $http()->post("{$base}/heartbeat", ['battery_voltage' => 12.6, 'lat' => $lat, 'lng' => $lng])->throw()->json();
+            $beat = $http()->post("{$base}/heartbeat", ['state' => 'armed', 'battery_voltage' => 4.05, 'lat' => $lat, 'lng' => $lng])->throw()->json();
             $this->line('Heartbeat OK. Armed: '.($beat['armed'] ? 'yes' : 'no'));
 
             sleep($interval);
 
             $http()->post("{$base}/alerts", [
-                'type' => AlertType::Movement->value,
+                'type' => AlertType::Push->value,
+                'level' => AlertLevel::TheftAttempt->value,
                 'lat' => $lat,
                 'lng' => $lng,
                 'sms_sent' => false,
-                'payload' => ['accel_delta' => 3.2, 'tilt_deg' => 4.1, 'source' => 'simulator'],
+                'payload' => ['knocks' => 3, 'jolts' => 7, 'max_tilt_deg' => 17.5, 'duration_ms' => 6200, 'source' => 'simulator'],
             ])->throw();
-            $this->warn('Movement alert sent.');
+            $this->warn('Theft attempt alert sent.');
 
             for ($step = 1; $step <= $steps; $step++) {
                 sleep($interval);
@@ -69,7 +72,7 @@ class SimulateDevice extends Command
                 $this->line(sprintf('[%d/%d] %.6f, %.6f', $step, $steps, $lat, $lng));
 
                 if ($step % 5 === 0) {
-                    $http()->post("{$base}/heartbeat", ['battery_voltage' => 12.5, 'lat' => $lat, 'lng' => $lng])->throw();
+                    $http()->post("{$base}/heartbeat", ['state' => 'alert', 'battery_voltage' => 3.72, 'lat' => $lat, 'lng' => $lng])->throw();
                 }
             }
         } finally {

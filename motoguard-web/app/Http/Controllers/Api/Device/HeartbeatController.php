@@ -15,6 +15,10 @@ class HeartbeatController extends Controller
             $request->device(),
             $request->filled('battery_voltage') ? $request->float('battery_voltage') : null,
             $request->point(),
+            $request->validated('state'),
+            $request->has('gps_chars') ? $request->integer('gps_chars') : null,
+            $request->has('gps_satellites') ? $request->integer('gps_satellites') : null,
+            $request->has('owner_nearby') ? $request->boolean('owner_nearby') : null,
         ));
     }
 }

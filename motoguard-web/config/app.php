@@ -67,6 +67,9 @@ return [
 
     'timezone' => 'UTC',
 
+    // Times are stored in UTC; this is only the zone clock times are shown in on the dashboard.
+    'display_timezone' => env('APP_DISPLAY_TIMEZONE', 'Asia/Manila'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Locale Configuration

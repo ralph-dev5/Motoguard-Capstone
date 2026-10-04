@@ -11,5 +11,10 @@
 
 @fonts
 
+{{-- Read by resources/js/echo.js. Given at runtime so the same built files work on the laptop and online. --}}
+<script>
+    window.reverbConfig = @json(['key' => config('broadcasting.connections.reverb.key'), 'port' => (int) config('reverb.servers.reverb.port', 8080)]);
+</script>
+
 @vite(['resources/css/app.css', 'resources/js/app.js'])
 @fluxAppearance

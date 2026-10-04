@@ -18,6 +18,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'device' => EnsureDeviceToken::class,
         ]);
+
+        // Online the app sits behind the host's HTTPS proxy. Trusting it lets Laravel see the
+        // request as https, so links, redirects and secure cookies come out right.
+        $middleware->trustProxies(at: '*');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
