@@ -72,7 +72,7 @@ class Alert extends Model
 
         $what = $this->level ? "{$this->level->label()} - {$this->type->label()}" : $this->type->label();
 
-        return "MotoGuard+ ALERT: {$what} on {$this->device->name}. {$where}";
+        return "MotoGuard+ ALERT: {$what} on {$this->device->label()}. {$where}";
     }
 
     /**
@@ -86,7 +86,7 @@ class Alert extends Model
             'label' => $this->level ? "{$this->level->label()}: {$this->type->label()}" : $this->type->label(),
             'level' => $this->level?->value,
             'device_id' => $this->device_id,
-            'device_name' => $this->device->name,
+            'device_name' => $this->device->label(),
             'location' => $this->location?->toArray(),
             'created_at' => $this->created_at->toIso8601String(),
         ];

@@ -203,7 +203,7 @@ new #[Title('Alerts')] class extends Component {
         <flux:select wire:model.live="device" :label="__('Motorcycle')">
             <flux:select.option value="">{{ __('All motorcycles') }}</flux:select.option>
             @foreach ($this->devices as $option)
-                <flux:select.option :value="$option->id">{{ $option->name }}</flux:select.option>
+                <flux:select.option :value="$option->id">{{ $option->label() }}</flux:select.option>
             @endforeach
         </flux:select>
 
@@ -260,7 +260,7 @@ new #[Title('Alerts')] class extends Component {
                             <x-alert-evidence :alert="$alert" class="mt-0.5 block font-normal" />
                         </td>
                         <td class="px-4 py-3">
-                            <a href="{{ route('devices.show', $alert->device) }}" wire:navigate class="hover:underline">{{ $alert->device->name }}</a>
+                            <a href="{{ route('devices.show', $alert->device) }}" wire:navigate class="hover:underline">{{ $alert->device->label() }}</a>
                         </td>
                         <td class="px-4 py-3"><x-alert-time :alert="$alert" /></td>
                         <td class="whitespace-nowrap px-4 py-3">

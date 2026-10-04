@@ -299,6 +299,15 @@ class Device extends Model implements AuthenticatableContract
         return $reported ? ArmState::Armed : ArmState::Arming;
     }
 
+    /**
+     * How the device is called wherever it is listed: its ID, with the plate beside it once the
+     * owner has added one. The ID alone says nothing to someone with more than one motorcycle.
+     */
+    public function label(): string
+    {
+        return $this->plate_number ? $this->serial.' · '.$this->plate_number : $this->serial;
+    }
+
     /** What a board's built-in ID looks like: MG- and the last six hex digits of its chip address. */
     public const SERIAL_PATTERN = '/^MG-[0-9A-F]{6}$/';
 

@@ -187,7 +187,10 @@ new #[Title('Motorcycle')] class extends Component {
         <div>
             <flux:link :href="route('devices.index')" wire:navigate class="text-sm">&larr; {{ __('Devices') }}</flux:link>
             <div class="mt-1 flex flex-wrap items-center gap-3">
-                <flux:heading size="xl" level="1">{{ $device->name }}</flux:heading>
+                <flux:heading size="xl" level="1" class="font-mono">{{ $device->serial }}</flux:heading>
+                @if ($device->plate_number)
+                    <flux:badge color="zinc" icon="identification">{{ $device->plate_number }}</flux:badge>
+                @endif
                 <x-device-status
                     :device="$device"
                     wire:key="presence-{{ $device->id }}"
@@ -199,7 +202,9 @@ new #[Title('Motorcycle')] class extends Component {
                 <flux:badge :icon="$device->armState()->icon()" :color="$device->armState()->color()">{{ __($device->armState()->label()) }}</flux:badge>
             </div>
             <flux:text class="mt-1">
-                {{ $device->plate_number ?? __('No plate') }} · {{ __('Serial') }} {{ $device->serial }} ·
+                @unless ($device->plate_number)
+                    {{ __('No plate number yet') }} ·
+                @endunless
                 {{ __('Battery') }} <x-battery :device="$device" class="align-middle" /> ·
                 {{ __('Last seen') }} {{ $device->last_seen_at?->diffForHumans() ?? __('never') }}
             </flux:text>

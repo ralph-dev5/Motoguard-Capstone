@@ -146,7 +146,7 @@ new #[Title('Dashboard')] class extends Component {
 
         app(DeviceTelemetry::class)->setArmed($device, ! $device->is_armed);
 
-        Flux::toast(text: __($device->is_armed ? ':name armed.' : ':name disarmed.', ['name' => $device->name]));
+        Flux::toast(text: __($device->is_armed ? ':name armed.' : ':name disarmed.', ['name' => $device->label()]));
     }
 
     /**
@@ -258,7 +258,7 @@ new #[Title('Dashboard')] class extends Component {
                                     <x-alert-level :alert="$alert" />
                                     <span class="truncate">{{ $alert->type->label() }}</span>
                                 </div>
-                                <flux:text class="truncate text-xs">{{ $alert->device->name }} · {{ $alert->created_at->timezone(config('app.display_timezone'))->format('M j, g:i A') }}</flux:text>
+                                <flux:text class="truncate text-xs">{{ $alert->device->label() }} · {{ $alert->created_at->timezone(config('app.display_timezone'))->format('M j, g:i A') }}</flux:text>
                                 <x-alert-evidence :alert="$alert" class="block truncate" />
                             </div>
                             @if ($alert->acknowledged_at)
@@ -280,8 +280,8 @@ new #[Title('Dashboard')] class extends Component {
             <div wire:key="device-{{ $device->id }}" class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
                 <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
-                        <a href="{{ route('devices.show', $device) }}" wire:navigate class="block truncate font-semibold text-zinc-900 hover:underline dark:text-white">{{ $device->name }}</a>
-                        <flux:text class="text-xs">{{ $device->plate_number ?? $device->serial }}</flux:text>
+                        <a href="{{ route('devices.show', $device) }}" wire:navigate class="block truncate font-semibold text-zinc-900 hover:underline dark:text-white"><span class="font-mono">{{ $device->serial }}</span></a>
+                        <flux:text class="text-xs">{{ $device->plate_number ?? __('No plate number yet') }}</flux:text>
                     </div>
                     <div class="flex shrink-0 flex-col items-end gap-1">
                         <x-device-status

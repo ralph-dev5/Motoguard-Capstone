@@ -90,8 +90,12 @@ new #[Title('Devices')] class extends Component {
                 @forelse ($this->devices as $device)
                     <tr wire:key="device-{{ $device->id }}">
                         <td class="px-4 py-3">
-                            <a href="{{ route('devices.show', $device) }}" wire:navigate class="font-mono font-medium hover:underline">{{ $device->serial }}</a>
-                            <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ $device->plate_number }}</div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <a href="{{ route('devices.show', $device) }}" wire:navigate class="font-mono font-medium hover:underline">{{ $device->serial }}</a>
+                                @if ($device->plate_number)
+                                    <flux:badge size="sm" color="zinc">{{ $device->plate_number }}</flux:badge>
+                                @endif
+                            </div>
                         </td>
                         <td class="px-4 py-3">{{ $device->owner_phone }}</td>
                         <td class="px-4 py-3">
