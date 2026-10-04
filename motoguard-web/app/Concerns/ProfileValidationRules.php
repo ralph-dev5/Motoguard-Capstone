@@ -38,10 +38,15 @@ trait ProfileValidationRules
      */
     protected function emailRules(?int $userId = null): array
     {
+        // A real, reachable address: correct format with a proper domain (not "name@123"), and a
+        // domain that actually accepts mail. Password resets and alerts are sent there, so a made-up
+        // address locks the owner out. The mail-server lookup is skipped in tests, which run offline.
+        $email = Rule::email()->rfcCompliant()->withNativeValidation();
+
         return [
             'required',
             'string',
-            'email',
+            app()->environment('testing') ? $email : $email->validateMxRecord(),
             'max:255',
             $userId === null
                 ? Rule::unique(User::class)
