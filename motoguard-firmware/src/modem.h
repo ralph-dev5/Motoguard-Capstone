@@ -19,3 +19,7 @@ bool netDiscoverPoll(String& host, uint16_t& port);
 String netNetworkName();
 // Moves to the other saved network (usual WiFi <-> phone hotspot). False when there is no other.
 bool netSwitchNetwork();
+// Test aid: for the next durationMs the board behaves as if it had no connection (WiFi itself is
+// left alone), so offline recording can be shown without switching a router off. 0 ends it.
+void netSimulateOffline(unsigned long durationMs);
+bool netSimulatingOffline();

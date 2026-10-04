@@ -453,8 +453,41 @@ static void serviceOutbox(unsigned long now) {
     }
 }
 
+/**
+ * Test commands over the USB serial line:
+ *   offline 60   act as if there were no connection for 60 seconds
+ *   online       end that early
+ *   status       what is waiting in the outbox, and free memory
+ */
+static void serviceSerialCommands() {
+    static String line;
+    while (Serial.available()) {
+        char c = (char) Serial.read();
+        if (c != '\n' && c != '\r') {
+            if (line.length() < 40) {
+                line += c;
+            }
+            continue;
+        }
+        line.trim();
+        if (line.startsWith("offline")) {
+            long seconds = constrain(line.substring(7).toInt(), 5L, 600L);
+            netSimulateOffline((unsigned long) seconds * 1000UL);
+            Serial.printf("[test] Acting offline for %ld s: alerts and GPS points are kept, not sent\n", seconds);
+        } else if (line == "online") {
+            netSimulateOffline(0);
+            Serial.println("[test] Back online");
+        } else if (line == "status") {
+            Serial.printf("[test] outbox: %d alert(s), %d GPS point(s); %s; free memory %u B\n", outboxAlertCount(),
+                          outboxLocationCount(), netSimulatingOffline() ? "acting offline" : "normal", ESP.getFreeHeap());
+        }
+        line = "";
+    }
+}
+
 void loop() {
     unsigned long now = millis();
+    serviceSerialCommands();
     serviceCalibration(now);
     serviceEnrollment(now);
     smsUpdate(now);

@@ -26,6 +26,7 @@ static String primarySsid, primaryPass;
 static String backupSsid, backupPass;
 static bool onBackup = false;
 static unsigned long disconnectedSinceMs = 0;
+static unsigned long offlineUntilMs = 0;   // see netSimulateOffline
 static unsigned long lastSwitchMs = 0;
 
 static void loadNetworks() {
@@ -220,7 +221,22 @@ void netUpdate() {
     // Nothing to service.
 }
 
+void netSimulateOffline(unsigned long durationMs) {
+    offlineUntilMs = durationMs > 0 ? millis() + durationMs : 0;
+}
+
+bool netSimulatingOffline() {
+    if (offlineUntilMs != 0 && (long) (millis() - offlineUntilMs) >= 0) {
+        offlineUntilMs = 0;
+        Serial.println("[test] Back online");
+    }
+    return offlineUntilMs != 0;
+}
+
 bool netEnsureConnected() {
+    if (netSimulatingOffline()) {
+        return false;
+    }
     unsigned long now = millis();
     if (WiFi.status() == WL_CONNECTED) {
         disconnectedSinceMs = 0;
@@ -272,6 +288,9 @@ bool netSwitchNetwork() {
 }
 
 String netNetworkName() {
+    if (netSimulatingOffline()) {
+        return String();
+    }
     return WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String();
 }
 
@@ -297,6 +316,9 @@ static WiFiUDP discoveryUdp;
 static bool discoveryOpen = false;
 
 bool netDiscoverPoll(String& host, uint16_t& port) {
+    if (netSimulatingOffline()) {
+        return false;
+    }
     if (WiFi.status() != WL_CONNECTED) {
         if (discoveryOpen) {
             discoveryUdp.stop();
@@ -399,6 +421,12 @@ String netNetworkName() {
 }
 
 bool netDiscoverPoll(String&, uint16_t&) {
+    return false;
+}
+
+void netSimulateOffline(unsigned long) {}
+
+bool netSimulatingOffline() {
     return false;
 }
 
