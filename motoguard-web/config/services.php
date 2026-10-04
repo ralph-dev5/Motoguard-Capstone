@@ -37,6 +37,12 @@ return [
         'sender_name' => env('SEMAPHORE_SENDER_NAME'),
     ],
 
+    // Shared with the firmware (DEVICE_ENROLL_SECRET in include/config.h). A board signs its ID
+    // with it to prove it is a real MotoGuard+ unit before it is handed a token.
+    'device' => [
+        'enroll_secret' => env('DEVICE_ENROLL_SECRET'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

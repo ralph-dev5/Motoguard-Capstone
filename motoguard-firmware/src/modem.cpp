@@ -7,6 +7,7 @@
 #include <ArduinoOTA.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <WiFiManager.h>
 #include <WiFiUdp.h>
 #include <esp_wifi.h>
@@ -14,6 +15,9 @@
 #include "settings.h"
 
 static WiFiClient client;
+// For the online server. Certificates are not checked (setInsecure): the link is encrypted, and
+// what the server trusts is the board's token, not the other way round.
+static WiFiClientSecure secureClient;
 
 // Two networks: the usual one (saved by the setup page) and the owner's phone hotspot (sent by
 // the dashboard). Credentials are kept here rather than in the WiFi driver, so joining the
@@ -150,20 +154,23 @@ static bool setupButtonPressed() {
 
 void netBegin() {
     WiFi.mode(WIFI_STA);
+    secureClient.setInsecure();
+    secureClient.setHandshakeTimeout(10);  // seconds
 
     const ServerSettings& server = settingsServer();
     String port(server.port);
 
     WiFiManager wm;
-    // Left empty on purpose: the device finds the server by itself (see netDiscoverServer).
+    // Left empty on purpose: the device finds the server by itself (see netDiscoverPoll).
     WiFiManagerParameter hostParam("api_host", "Server IP (leave empty: found automatically)", "", 64);
     WiFiManagerParameter portParam("api_port", "Server port", port.c_str(), 6);
-    // Left empty on purpose: the owner types the six-character pairing code from the dashboard, and
-    // leaving it empty keeps the token the device already has.
-    WiFiManagerParameter tokenParam("device_token", "Pairing code from the dashboard (leave empty to keep the current one)", "", 128);
+    // Read-only: the ID the owner types on the dashboard to add this device.
+    String idHtml = "<p style='margin:14px 0 4px'>Device ID</p><p style='font:700 22px monospace;letter-spacing:2px;margin:0 0 6px'>"
+        + settingsDeviceId() + "</p><p style='margin:0 0 14px'>Type this ID on the dashboard: Devices, then Add device.</p>";
+    WiFiManagerParameter idParam(idHtml.c_str());
+    wm.addParameter(&idParam);
     wm.addParameter(&hostParam);
     wm.addParameter(&portParam);
-    wm.addParameter(&tokenParam);
 
     bool saved = false;
     wm.setSaveConfigCallback([&saved] { saved = true; });
@@ -200,7 +207,7 @@ void netBegin() {
     }
 
     if (saved) {
-        settingsSave(hostParam.getValue(), atoi(portParam.getValue()), tokenParam.getValue());
+        settingsSave(hostParam.getValue(), atoi(portParam.getValue()));
     }
 
     if (connected) {
@@ -305,8 +312,7 @@ void netSetBackupWifi(const String& ssid, const String& password) {
 static WiFiUDP discoveryUdp;
 static bool discoveryOpen = false;
 
-bool netDiscoverPoll(bool& changed) {
-    changed = false;
+bool netDiscoverPoll(String& host, uint16_t& port) {
     if (WiFi.status() != WL_CONNECTED) {
         if (discoveryOpen) {
             discoveryUdp.stop();
@@ -330,33 +336,17 @@ bool netDiscoverPoll(bool& changed) {
         if (strstr(buf, "\"motoguard\"") == nullptr || portAt == nullptr) {
             continue;
         }
-        uint16_t port = atoi(portAt + 7);
-        String host = discoveryUdp.remoteIP().toString();
-        const ServerSettings& server = settingsServer();
-        if (host != server.host || port != server.port) {
-            Serial.printf("[discover] Server found at %s:%u (was %s:%u)\n", host.c_str(), port,
-                          server.host.c_str(), server.port);
-            settingsSave(host, port, "");
-            changed = true;
-        }
+        port = atoi(portAt + 7);
+        host = discoveryUdp.remoteIP().toString();
         heard = true;
     }
     return heard;
 }
 
-bool netDiscoverServer(unsigned long timeoutMs) {
-    bool changed = false;
-    unsigned long start = millis();
-    while (millis() - start < timeoutMs) {
-        if (netDiscoverPoll(changed)) {
-            return true;
-        }
-        delay(50);
+Client& netClient(bool secure) {
+    if (secure) {
+        return secureClient;
     }
-    return false;
-}
-
-Client& netClient() {
     return client;
 }
 
@@ -404,7 +394,7 @@ bool netEnsureConnected() {
     return connected;
 }
 
-Client& netClient() {
+Client& netClient(bool) {
     return client;
 }
 
@@ -425,12 +415,7 @@ String netNetworkName() {
     return modem.isGprsConnected() ? String("cellular") : String();
 }
 
-bool netDiscoverServer(unsigned long) {
-    return false;
-}
-
-bool netDiscoverPoll(bool& changed) {
-    changed = false;
+bool netDiscoverPoll(String&, uint16_t&) {
     return false;
 }
 

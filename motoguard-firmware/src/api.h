@@ -13,6 +13,7 @@ struct HeartbeatResult {
     bool hasBackupWifi;   // the server said which phone hotspot to use (empty name when none)
     String backupSsid;
     String backupPass;
+    bool rejected;        // the server no longer accepts this board's token
 };
 
 HeartbeatResult apiHeartbeat(const char* state, float batteryVolts, const GpsFix& fix, bool ownerNearby);
@@ -27,6 +28,11 @@ bool apiSendAlert(const char* type, const char* level, const GpsFix& fix, bool s
                   const ThreatReport* evidence);
 bool apiSendCalibration(const CalibrationResult& result);
 
-enum class PairResult { Paired, Rejected, Unreachable };
-// Trades a dashboard pairing code for this device's token (stored on success).
-PairResult apiPair(const String& code);
+enum class EnrollResult {
+    Enrolled,     // the server handed over a token (saved)
+    NotAdded,     // nobody has added this board's ID on the dashboard yet
+    Refused,      // the server could not verify this board (DEVICE_ENROLL_SECRET differs)
+    Unreachable,  // no network or no answer: worth another try
+};
+// Asks the server for this board's token using the ID built into its chip.
+EnrollResult apiEnroll();

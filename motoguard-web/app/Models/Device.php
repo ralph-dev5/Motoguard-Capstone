@@ -27,8 +27,6 @@ use Laravel\Sanctum\HasApiTokens;
  * @property string $name
  * @property string|null $plate_number
  * @property string $serial
- * @property string|null $pairing_code
- * @property CarbonImmutable|null $pairing_code_expires_at
  * @property string|null $owner_phone
  * @property string|null $owner_beacon
  * @property string|null $hotspot_ssid
@@ -54,7 +52,7 @@ use Laravel\Sanctum\HasApiTokens;
  * @property CarbonImmutable|null $updated_at
  */
 #[Hidden(['hotspot_password'])]
-#[Fillable(['name', 'plate_number', 'serial', 'pairing_code', 'pairing_code_expires_at', 'owner_phone', 'owner_beacon', 'hotspot_ssid', 'hotspot_password', 'owner_nearby', 'owner_seen_at', 'is_armed', 'reported_armed', 'calibration_requested_at', 'calibrated_at', 'calibration', 'status', 'battery_voltage', 'gps_chars', 'gps_satellites', 'gps_fix_at', 'last_seen_at', 'last_location', 'safe_zone_center', 'safe_zone_radius_m', 'parked_at'])]
+#[Fillable(['name', 'plate_number', 'serial', 'owner_phone', 'owner_beacon', 'hotspot_ssid', 'hotspot_password', 'owner_nearby', 'owner_seen_at', 'is_armed', 'reported_armed', 'calibration_requested_at', 'calibrated_at', 'calibration', 'status', 'battery_voltage', 'gps_chars', 'gps_satellites', 'gps_fix_at', 'last_seen_at', 'last_location', 'safe_zone_center', 'safe_zone_radius_m', 'parked_at'])]
 class Device extends Model implements AuthenticatableContract
 {
     /** @use HasFactory<DeviceFactory> */
@@ -120,7 +118,6 @@ class Device extends Model implements AuthenticatableContract
             'is_armed' => 'boolean',
             'reported_armed' => 'boolean',
             'hotspot_password' => 'encrypted',
-            'pairing_code_expires_at' => 'datetime',
             'owner_nearby' => 'boolean',
             'owner_seen_at' => 'datetime',
             'calibration_requested_at' => 'datetime',
@@ -302,35 +299,8 @@ class Device extends Model implements AuthenticatableContract
         return $reported ? ArmState::Armed : ArmState::Arming;
     }
 
-    /** Minutes a pairing code stays valid. */
-    public const PAIRING_CODE_MINUTES = 15;
-
-    /** Letters and digits that cannot be misread for each other (no 0/O, 1/I/L). */
-    private const PAIRING_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-
-    /**
-     * A fresh six-character code the device can trade for its token, replacing any earlier one.
-     */
-    public function issuePairingCode(): string
-    {
-        do {
-            $code = collect(range(1, 6))
-                ->map(fn () => self::PAIRING_ALPHABET[random_int(0, strlen(self::PAIRING_ALPHABET) - 1)])
-                ->implode('');
-        } while (self::query()->where('pairing_code', $code)->exists());
-
-        $this->update([
-            'pairing_code' => $code,
-            'pairing_code_expires_at' => now()->addMinutes(self::PAIRING_CODE_MINUTES),
-        ]);
-
-        return $code;
-    }
-
-    public function hasValidPairingCode(): bool
-    {
-        return $this->pairing_code !== null && $this->pairing_code_expires_at?->isFuture() === true;
-    }
+    /** What a board's built-in ID looks like: MG- and the last six hex digits of its chip address. */
+    public const SERIAL_PATTERN = '/^MG-[0-9A-F]{6}$/';
 
     /**
      * Replaces the firmware token; the old one stops working immediately.

@@ -1,16 +1,26 @@
 #include "settings.h"
 
 #include <Preferences.h>
+#include <esp_mac.h>
 
 #include "config.h"
 
-static ServerSettings current;
-static String pairCode;
-
-// Dashboard pairing codes are six characters; device tokens are dozens.
-static const size_t PAIR_CODE_MAX_LEN = 10;
+static ServerSettings current;   // what requests use
+static String homeHost;          // the saved server, restored by settingsUseHome()
+static uint16_t homePort = 0;
+static bool onTemporary = false;
+static String deviceId;
 
 void settingsBegin() {
+    // The chip's factory WiFi address is unique per board, so its last three bytes make an ID
+    // nobody has to assign: the same board always reports the same one.
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char id[12];
+    snprintf(id, sizeof(id), "MG-%02X%02X%02X", mac[3], mac[4], mac[5]);
+    deviceId = id;
+    Serial.printf("[device] ID %s\n", deviceId.c_str());
+
     Preferences prefs;
     prefs.begin("server", false);
 
@@ -24,74 +34,66 @@ void settingsBegin() {
         Serial.printf("[settings] Re-seeded from config.h (version %u)\n", (unsigned)SETTINGS_VERSION);
     }
 
-    current.host = prefs.getString("host", API_HOST);
-    current.port = prefs.getUShort("port", API_PORT);
+    homeHost = prefs.getString("host", API_HOST);
+    homePort = prefs.getUShort("port", API_PORT);
+    current.host = homeHost;
+    current.port = homePort;
     current.token = prefs.getString("token", DEVICE_TOKEN);
-    pairCode = prefs.getString("pair", "");
     prefs.end();
 
-    if (pairCode.length() > 0) {
-        Serial.printf("[settings] Pairing code %s waiting to be used\n", pairCode.c_str());
-    }
-
-    Serial.printf("[settings] Server %s:%u\n", current.host.c_str(), current.port);
+    Serial.printf("[settings] Server %s:%u, %s\n", current.host.c_str(), current.port,
+                  current.token.length() > 0 ? "enrolled" : "not enrolled yet");
 }
 
 const ServerSettings& settingsServer() {
     return current;
 }
 
-void settingsSave(const String& host, uint16_t port, const String& tokenOrCode) {
-    String value = tokenOrCode;
-    value.trim();
+const String& settingsDeviceId() {
+    return deviceId;
+}
 
-    // Left empty on the setup page: keep the address the device already has (or will discover).
+void settingsSave(const String& host, uint16_t port) {
+    // Left empty on the setup page: keep the address the device already has.
     String newHost = host;
     newHost.trim();
     if (newHost.length() > 0) {
-        current.host = newHost;
+        homeHost = newHost;
     }
-    current.port = port > 0 ? port : API_PORT;
-    if (value.length() > PAIR_CODE_MAX_LEN) {
-        current.token = value;
-        pairCode = "";
-    } else if (value.length() > 0) {
-        pairCode = value;
-    }
+    homePort = port > 0 ? port : API_PORT;
+    settingsUseHome();
 
     Preferences prefs;
     prefs.begin("server", false);
-    prefs.putString("host", current.host);
-    prefs.putUShort("port", current.port);
-    prefs.putString("token", current.token);
-    prefs.putString("pair", pairCode);
+    prefs.putString("host", homeHost);
+    prefs.putUShort("port", homePort);
     prefs.putULong("ver", SETTINGS_VERSION);
     prefs.end();
 
-    Serial.printf("[settings] Saved server %s:%u%s\n", current.host.c_str(), current.port,
-                  pairCode.length() > 0 ? " with a pairing code" : "");
+    Serial.printf("[settings] Saved server %s:%u\n", homeHost.c_str(), homePort);
 }
 
-const String& settingsPairCode() {
-    return pairCode;
-}
+void settingsSaveToken(const String& token) {
+    current.token = token;
 
-static void storeToken(const String& token) {
     Preferences prefs;
     prefs.begin("server", false);
     prefs.putString("token", token);
-    prefs.putString("pair", "");
     prefs.end();
 }
 
-void settingsPaired(const String& token) {
-    current.token = token;
-    pairCode = "";
-    storeToken(token);
-    Serial.println("[settings] Paired: token received and saved");
+void settingsUseTemporary(const String& host, uint16_t port) {
+    current.host = host;
+    current.port = port;
+    onTemporary = true;
 }
 
-void settingsDropPairCode() {
-    pairCode = "";
-    storeToken(current.token);
+void settingsUseHome() {
+    current.host = homeHost;
+    current.port = homePort;
+    onTemporary = false;
+}
+
+bool settingsOnTemporary() {
+    return onTemporary;
 }

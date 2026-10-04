@@ -6,14 +6,18 @@
 // Host only, no "http://". For cellular testing use your ngrok host, e.g. "abcd-1234.ngrok-free.app" with port 80.
 // For WiFi testing on the same network use your PC's LAN IP and run: php artisan serve --host=0.0.0.0
 // WiFi builds: these are only defaults, the setup portal can change them.
-#define API_HOST "192.168.1.10"
-#define API_PORT 8000
-#define DEVICE_TOKEN "paste-the-token-from-the-devices-page"
+#define API_HOST "your-site.onrender.com"   // or the laptop's LAN address
+#define API_PORT 443                          // 443 = HTTPS (online); 8000 = laptop on the LAN
+#define DEVICE_TOKEN ""   // leave empty: the board enrolls by itself with its built-in ID
 
 // Bump this whenever you change the three values above and want them to win over what the
 // setup portal saved. On the first boot after a bump the firmware re-seeds its stored copy
 // from this file; leave it alone and portal edits survive reflashing. WiFi credentials are
 // kept by WiFiManager separately and are never touched.
+// Shared with the server (DEVICE_ENROLL_SECRET in its .env). The board signs its built-in ID with
+// it to prove it is a genuine unit before the server hands it a token.
+#define DEVICE_ENROLL_SECRET "same-value-as-the-server"
+
 #define SETTINGS_VERSION 1
 
 // ---- Owner ----
@@ -151,6 +155,13 @@
 // The dashboard's window is set server side in config/presence.php (PRESENCE_OFFLINE_AFTER),
 // currently 6 s because php artisan serve queues a ping behind any page render.
 #define PRESENCE_PING_INTERVAL_MS 1000
+// Over HTTPS (the online server) each request costs more, so the pings are spaced out; the
+// dashboard's 20 s presence window still sees several of them.
+#define PRESENCE_PING_INTERVAL_TLS_MS 5000
+// A first HTTPS request includes the TLS handshake, which takes this chip a second or two.
+#define TLS_MIN_TIMEOUT_MS 8000
+// On a stand-in server found on the local network: how often to try the home server again.
+#define HOME_RETRY_MS 60000
 // Must clear the server's worst normal response, not its best: php artisan serve is
 // single-threaded and regularly takes ~1 s when a page render is in front of the ping. At 1200
 // this timed out constantly, which showed up as the badge flapping and "[ping] failing (-3)".

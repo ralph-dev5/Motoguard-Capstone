@@ -318,3 +318,48 @@ test('heartbeat records the owner nearby and hands the device its beacon', funct
         ->and($device->owner_seen_at)->not->toBeNull()
         ->and($device->is_armed)->toBeTrue();
 });
+
+test('a board enrolls with its ID and a valid proof once its owner has added it', function () {
+    config(['services.device.enroll_secret' => 'test-secret']);
+    $device = Device::factory()->create(['serial' => 'MG-04A784']);
+
+    $response = $this->postJson(route('api.device.enroll'), [
+        'serial' => 'MG-04A784',
+        'proof' => hash_hmac('sha256', 'MG-04A784', 'test-secret'),
+    ])->assertCreated();
+
+    expect($response->json('token'))->toContain('|')
+        ->and($response->json('device.id'))->toBe($device->id)
+        ->and($device->tokens()->count())->toBe(1);
+});
+
+test('a board with a wrong proof is refused', function () {
+    config(['services.device.enroll_secret' => 'test-secret']);
+    $device = Device::factory()->create(['serial' => 'MG-04A784']);
+
+    $this->postJson(route('api.device.enroll'), [
+        'serial' => 'MG-04A784',
+        'proof' => hash_hmac('sha256', 'MG-04A784', 'someone-elses-secret'),
+    ])->assertForbidden();
+
+    expect($device->tokens()->count())->toBe(0);
+});
+
+test('a board nobody has added yet is told to keep waiting', function () {
+    config(['services.device.enroll_secret' => 'test-secret']);
+
+    $this->postJson(route('api.device.enroll'), [
+        'serial' => 'MG-ABCDEF',
+        'proof' => hash_hmac('sha256', 'MG-ABCDEF', 'test-secret'),
+    ])->assertNotFound();
+});
+
+test('enrolling is refused outright when no secret is configured', function () {
+    config(['services.device.enroll_secret' => null]);
+    Device::factory()->create(['serial' => 'MG-04A784']);
+
+    $this->postJson(route('api.device.enroll'), [
+        'serial' => 'MG-04A784',
+        'proof' => hash_hmac('sha256', 'MG-04A784', ''),
+    ])->assertForbidden();
+});

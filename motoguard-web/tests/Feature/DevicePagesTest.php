@@ -72,22 +72,43 @@ test('other users cannot open someone elses device', function () {
         ->assertForbidden();
 });
 
-test('registering a device issues a firmware token', function () {
+test('a device is added by the ID built into the board', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test('pages::devices.index')
-        ->set('name', 'Yamaha NMAX')
-        ->set('serial', 'MG-0001')
-        ->set('owner_phone', '+639171234567')
-        ->call('register')
-        ->assertHasNoErrors()
-        ->assertSet('newToken', fn (?string $token) => $token !== null && str_contains($token, '|'));
+        ->set('serial', ' mg04a784 ')
+        ->call('addDevice')
+        ->assertHasNoErrors();
 
     $device = $user->devices()->sole();
 
-    expect($device->serial)->toBe('MG-0001')
-        ->and($device->tokens()->count())->toBe(1);
+    // Typed loosely, stored in the one canonical form the board reports.
+    expect($device->serial)->toBe('MG-04A784')
+        ->and($device->name)->toBe('MotoGuard MG-04A784')
+        ->and($device->owner_phone)->toBeNull()
+        // The board collects its own token when it enrolls; adding the ID issues none.
+        ->and($device->tokens()->count())->toBe(0);
+});
+
+test('a device ID that is already registered is refused', function () {
+    Device::factory()->create(['serial' => 'MG-04A784']);
+
+    Livewire::actingAs(User::factory()->create())
+        ->test('pages::devices.index')
+        ->set('serial', 'MG-04A784')
+        ->call('addDevice')
+        ->assertHasErrors(['serial' => 'unique']);
+
+    expect(Device::query()->count())->toBe(1);
+});
+
+test('a device ID in the wrong format is refused', function () {
+    Livewire::actingAs(User::factory()->create())
+        ->test('pages::devices.index')
+        ->set('serial', 'MG-0001')
+        ->call('addDevice')
+        ->assertHasErrors(['serial' => 'regex']);
 });
 
 test('the owner can set the parking zone radius', function () {

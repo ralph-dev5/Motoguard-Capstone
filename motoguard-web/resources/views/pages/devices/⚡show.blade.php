@@ -5,7 +5,6 @@ use App\Models\Alert;
 use App\Models\Device;
 use App\Models\LocationLog;
 use App\Services\DeviceTelemetry;
-use App\Support\ServerAddress;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
@@ -122,7 +121,7 @@ new #[Title('Motorcycle')] class extends Component {
         $validated = $this->validate([
             'name' => ['required', 'string', 'max:100'],
             'plate_number' => ['nullable', 'string', 'max:20'],
-            'owner_phone' => ['required', 'string', 'regex:/^\+?[0-9]{10,15}$/'],
+            'owner_phone' => ['nullable', 'string', 'regex:/^\+?[0-9]{10,15}$/'],
             // An iBeacon UUID broadcast by the owner's phone, or the fixed address of a Bluetooth tag.
             'owner_beacon' => ['nullable', 'string', 'regex:/^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})$/'],
             // WPA2 limits: 32-byte name, 8-63 character password.
@@ -133,30 +132,13 @@ new #[Title('Motorcycle')] class extends Component {
         $this->device->update([
             ...$validated,
             'plate_number' => $validated['plate_number'] ?: null,
+            'owner_phone' => $validated['owner_phone'] ?: null,
             'owner_beacon' => $validated['owner_beacon'] ? strtolower($validated['owner_beacon']) : null,
             'hotspot_ssid' => $validated['hotspot_ssid'] ?: null,
             'hotspot_password' => $validated['hotspot_ssid'] ? $validated['hotspot_password'] : null,
         ]);
 
         Flux::toast(text: __('Details saved.'), variant: 'success');
-    }
-
-    /**
-     * Where the device should send its data, worked out for the owner (see ServerAddress).
-     *
-     * @return array{host: string, port: int}
-     */
-    #[Computed]
-    public function serverAddress(): array
-    {
-        return ServerAddress::forDevices(request());
-    }
-
-    public function getPairingCode(): void
-    {
-        $this->authorize('update', $this->device);
-
-        $this->device->issuePairingCode();
     }
 
     public function generateBeacon(): void
@@ -239,14 +221,10 @@ new #[Title('Motorcycle')] class extends Component {
 
 
     {{--
-        Shown only while the device is silent. Everything the owner must type into the device's
-        setup page is on this card, with the long token replaced by a six-character pairing code.
+        Shown only while the device is silent. The board identifies itself by its built-in ID, so
+        the owner only has to give it WiFi: there is no code or token to type.
     --}}
     @unless ($device->isRecentlySeen())
-        @php
-            $server = $this->serverAddress;
-            $code = $device->hasValidPairingCode() ? $device->pairing_code : null;
-        @endphp
         <div class="rounded-xl border border-blue-500/40 bg-blue-500/5 p-5" wire:poll.10s="refreshDevice">
             <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="flex items-start gap-3">
@@ -254,8 +232,8 @@ new #[Title('Motorcycle')] class extends Component {
                         <flux:icon name="signal-slash" />
                     </span>
                     <div>
-                        <flux:heading size="lg">{{ __('Connect this motorcycle') }}</flux:heading>
-                        <flux:text class="text-sm">{{ __('The device is not reporting yet. Do these steps on your phone; it takes about a minute.') }}</flux:text>
+                        <flux:heading size="lg">{{ __('Connect this device') }}</flux:heading>
+                        <flux:text class="text-sm">{{ __('The device is not reporting yet. It only needs WiFi: do these steps on your phone, it takes about a minute.') }}</flux:text>
                     </div>
                 </div>
                 <span class="inline-flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
@@ -263,15 +241,15 @@ new #[Title('Motorcycle')] class extends Component {
                         <span class="absolute inline-flex size-full animate-ping rounded-full bg-blue-400 opacity-75"></span>
                         <span class="relative inline-flex size-2.5 rounded-full bg-blue-500"></span>
                     </span>
-                    {{ __('Waiting for the device…') }}
+                    {{ __('Waiting for :id…', ['id' => $device->serial]) }}
                 </span>
             </div>
 
-            <ol class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <ol class="mt-5 grid gap-4 md:grid-cols-3">
                 <li class="rounded-lg border border-zinc-200 bg-white/60 p-4 dark:border-zinc-700 dark:bg-zinc-900/40">
                     <div class="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">{{ __('Step 1') }}</div>
                     <div class="mt-1 font-medium text-zinc-900 dark:text-white">{{ __('Turn the device on') }}</div>
-                    <flux:text class="mt-1 text-sm">{{ __('If it cannot reach a saved WiFi, it opens its setup hotspot by itself. To change WiFi or server later, press the BOOT button within 1.5 seconds after switching it on.') }}</flux:text>
+                    <flux:text class="mt-1 text-sm">{{ __('If it cannot reach a saved WiFi, it opens its setup hotspot by itself. To change WiFi later, press the BOOT button within 1.5 seconds after switching it on.') }}</flux:text>
                 </li>
                 <li class="rounded-lg border border-zinc-200 bg-white/60 p-4 dark:border-zinc-700 dark:bg-zinc-900/40">
                     <div class="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">{{ __('Step 2') }}</div>
@@ -284,38 +262,13 @@ new #[Title('Motorcycle')] class extends Component {
                     </dl>
                     <flux:text class="mt-2 text-sm">{{ __('The setup page usually opens by itself. If not, open :url and tap “Configure WiFi”.', ['url' => '192.168.4.1']) }}</flux:text>
                 </li>
-                <li class="rounded-lg border border-zinc-200 bg-white/60 p-4 md:col-span-2 dark:border-zinc-700 dark:bg-zinc-900/40">
+                <li class="rounded-lg border border-zinc-200 bg-white/60 p-4 dark:border-zinc-700 dark:bg-zinc-900/40">
                     <div class="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">{{ __('Step 3') }}</div>
-                    <div class="mt-1 font-medium text-zinc-900 dark:text-white">{{ __('Pick your WiFi, enter the pairing code, tap Save') }}</div>
-                    <flux:text class="mt-1 text-sm">{{ __('Choose the WiFi the motorcycle will use and type its password. Leave the server boxes empty: the device finds the server by itself.') }}</flux:text>
-
-                    <div class="mt-3 grid gap-2 sm:grid-cols-2">
-                        <div class="rounded-lg border-2 border-blue-500/50 px-3 py-2" x-data="{ copied: false }">
-                            <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Pairing code') }}</div>
-                            @if ($code)
-                                <div class="flex items-center justify-between gap-2">
-                                    <span class="font-mono text-2xl font-semibold tracking-[0.2em] text-zinc-900 dark:text-white">{{ $code }}</span>
-                                    <button type="button" class="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
-                                        x-on:click="navigator.clipboard?.writeText(@js($code)); copied = true; setTimeout(() => copied = false, 1500)"
-                                        x-text="copied ? @js(__('Copied')) : @js(__('Copy'))">{{ __('Copy') }}</button>
-                                </div>
-                                <div class="text-xs text-zinc-500 dark:text-zinc-400">
-                                    {{ __('Expires :time.', ['time' => $device->pairing_code_expires_at->diffForHumans()]) }}
-                                    <button type="button" wire:click="getPairingCode" class="font-medium text-blue-600 hover:underline dark:text-blue-400">{{ __('New code') }}</button>
-                                </div>
-                            @else
-                                <flux:button size="sm" variant="primary" class="mt-1" wire:click="getPairingCode" icon="key">{{ __('Get pairing code') }}</flux:button>
-                            @endif
-                        </div>
-                        <div class="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700">
-                            <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Server') }}</div>
-                            <div class="font-mono text-zinc-900 dark:text-white">{{ $server['host'] }}:{{ $server['port'] }}</div>
-                            <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Found automatically. Only type it if the device cannot find it.') }}</div>
-                        </div>
-                    </div>
-                    <flux:text class="mt-2 text-xs">{{ __('Type the code in the “Pairing code” box at the bottom of the setup page. Away from home, the device also uses your phone hotspot if you add it under Details.') }}</flux:text>
+                    <div class="mt-1 font-medium text-zinc-900 dark:text-white">{{ __('Pick your WiFi and tap Save') }}</div>
+                    <flux:text class="mt-1 text-sm">{{ __('Choose a 2.4 GHz WiFi and type its password. The setup page shows the device’s ID: it should read :id. Nothing else to type.', ['id' => $device->serial]) }}</flux:text>
                 </li>
             </ol>
+            <flux:text class="mt-3 text-xs">{{ __('The device beeps twice when it has connected to your account. Away from home it also uses your phone hotspot if you add it under Details.') }}</flux:text>
         </div>
     @endunless
 
@@ -512,7 +465,7 @@ new #[Title('Motorcycle')] class extends Component {
                 <flux:heading>{{ __('Details') }}</flux:heading>
                 <flux:input wire:model="name" :label="__('Motorcycle name')" required />
                 <flux:input wire:model="plate_number" :label="__('Plate number')" />
-                <flux:input wire:model="owner_phone" :label="__('Owner phone for SMS')" required />
+                <flux:input wire:model="owner_phone" :label="__('Owner phone for SMS')" placeholder="+639171234567" />
                 <div class="space-y-2">
                     <flux:input wire:model="owner_beacon" :label="__('Owner phone Bluetooth ID')" placeholder="e.g. 5f3c9a2e-…" />
                     <flux:button type="button" size="xs" variant="ghost" icon="sparkles" wire:click="generateBeacon">{{ __('Generate an ID') }}</flux:button>

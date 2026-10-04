@@ -10,13 +10,19 @@ struct ServerSettings {
 };
 
 void settingsBegin();
+// The server in use right now: the saved "home" server, or a temporary one found on the local network.
 const ServerSettings& settingsServer();
-// `tokenOrCode` from the setup page: empty keeps the current token, a short value is a pairing
-// code from the dashboard (traded for a token once online), anything longer is the token itself.
-void settingsSave(const String& host, uint16_t port, const String& tokenOrCode);
-// Pairing code waiting to be traded for a token, or "" when there is none.
-const String& settingsPairCode();
-// The server accepted the code: store the token it returned and forget the code.
-void settingsPaired(const String& token);
-// The server rejected the code (wrong or expired): forget it so the device stops retrying.
-void settingsDropPairCode();
+// Saves a new home server from the setup page. An empty host keeps the current one.
+void settingsSave(const String& host, uint16_t port);
+
+// This board's own ID, built from its chip address: "MG-" and six hex digits. Never changes, needs
+// no setup, and is what the owner types on the dashboard to add the device.
+const String& settingsDeviceId();
+// Stores the token the server handed out when the board enrolled. An empty token means "not enrolled".
+void settingsSaveToken(const String& token);
+
+// A server announced on the local network, used only while the home server cannot be reached
+// (no internet at the venue, laptop demo). Kept in memory: a restart starts from home again.
+void settingsUseTemporary(const String& host, uint16_t port);
+void settingsUseHome();
+bool settingsOnTemporary();

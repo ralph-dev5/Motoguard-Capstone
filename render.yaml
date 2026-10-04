@@ -50,6 +50,8 @@ services:
         sync: false
       - key: REVERB_APP_SECRET
         sync: false
+      - key: DEVICE_ENROLL_SECRET
+        sync: false
       - key: REVERB_HOST
         value: 127.0.0.1
       - key: REVERB_PORT

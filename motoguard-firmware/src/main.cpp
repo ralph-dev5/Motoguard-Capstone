@@ -327,27 +327,47 @@ static void reportGps(unsigned long now) {
 }
 
 /**
- * A pairing code typed into the setup page is traded for the device token on first contact with
- * the server. Retried every 10 s until the server answers; a rejected code is dropped.
+ * A board with no token - or one the server stopped accepting - asks for a token using the ID
+ * built into its chip. It keeps asking every 10 s until its owner has added that ID on the
+ * dashboard, so the owner never types a code or a token.
  */
-static void servicePairing(unsigned long now) {
+static bool enrollNeeded = false;
+
+static void serviceEnrollment(unsigned long now) {
     static unsigned long lastTryMs = 0;
-    if (settingsPairCode().length() == 0 || (lastTryMs != 0 && now - lastTryMs < 10000)) {
+    static bool waitingSaid = false;
+
+    bool noToken = settingsServer().token.length() == 0;
+    if (!(noToken || enrollNeeded) || (lastTryMs != 0 && now - lastTryMs < 10000)) {
         return;
     }
     lastTryMs = now;
 
-    switch (apiPair(settingsPairCode())) {
-        case PairResult::Paired:
-            Serial.println("[pair] Paired with the dashboard");
+    switch (apiEnroll()) {
+        case EnrollResult::Enrolled:
+            Serial.printf("[enroll] Enrolled as %s\n", settingsDeviceId().c_str());
+            enrollNeeded = false;
+            waitingSaid = false;
+            pingFailures = 0;
+            lastPingMs = 0;
+            lastHeartbeatMs = 0;
             buzzerBeep(2);
             break;
-        case PairResult::Rejected:
-            Serial.println("[pair] Code rejected (wrong or expired). Get a new one from the dashboard and enter it again.");
-            settingsDropPairCode();
+        case EnrollResult::NotAdded:
+            if (!waitingSaid) {
+                Serial.printf("[enroll] %s is not on any account yet. On the dashboard: Devices > Add device, and type this ID.\n",
+                              settingsDeviceId().c_str());
+                waitingSaid = true;
+            }
+            pingFailures = 0;   // the server answered, so it is reachable
             break;
-        case PairResult::Unreachable:
-            Serial.println("[pair] Server not reachable yet, retrying in 10 s");
+        case EnrollResult::Refused:
+            Serial.println("[enroll] The server could not verify this board (DEVICE_ENROLL_SECRET differs from the server's)");
+            pingFailures = 0;
+            break;
+        case EnrollResult::Unreachable:
+            // Counts like failed pings, so the search for a server on the local network starts.
+            pingFailures += 3;
             break;
     }
 }
@@ -355,7 +375,7 @@ static void servicePairing(unsigned long now) {
 void loop() {
     unsigned long now = millis();
     serviceCalibration(now);
-    servicePairing(now);
+    serviceEnrollment(now);
 
     netUpdate();
     gpsUpdate();
@@ -377,20 +397,47 @@ void loop() {
     checkOwner();
     checkBattery(now);
 
-    // The server announces itself every 2 s. Hearing it while the pings are failing means it has
-    // just come up (or moved): report in at once instead of waiting out the retry timers.
-    bool serverMoved = false;
-    if (netDiscoverPoll(serverMoved) && (serverMoved || pingFailures > 0)) {
-        Serial.println("[discover] Server is announcing - reporting in now");
+    // A server on the local network announces itself every 2 s. It is used only while the home
+    // server (normally the online one) cannot be reached - no internet at the venue, or a laptop
+    // demo - and only in memory, so the board goes back home as soon as home answers again.
+    String announcedHost;
+    uint16_t announcedPort = 0;
+    if (netDiscoverPoll(announcedHost, announcedPort) && pingFailures >= 3) {
+        const ServerSettings& active = settingsServer();
+        if (announcedHost != active.host || announcedPort != active.port) {
+            Serial.printf("[discover] %s:%u is not answering - using the server on this network, %s:%u\n",
+                          active.host.c_str(), active.port, announcedHost.c_str(), announcedPort);
+            settingsUseTemporary(announcedHost, announcedPort);
+        } else {
+            Serial.println("[discover] Server is announcing again - reporting in now");
+        }
         pingFailures = 0;
         serverLostSinceMs = 0;
         lastPingMs = 0;
         lastHeartbeatMs = 0;
     }
 
+    static unsigned long lastHomeTryMs = 0;
+    if (settingsOnTemporary() && now - lastHomeTryMs >= HOME_RETRY_MS) {
+        lastHomeTryMs = now;
+        ServerSettings standIn = settingsServer();
+        settingsUseHome();
+        bool ignored = false;
+        if (apiPing(ignored)) {
+            Serial.println("[discover] Home server is answering again - back to it");
+            pingFailures = 0;
+            lastHeartbeatMs = 0;
+        } else {
+            settingsUseTemporary(standIn.host, standIn.port);
+        }
+    }
+
+    bool enrolled = settingsServer().token.length() > 0;
+    unsigned long pingInterval = settingsServer().port == 443 ? PRESENCE_PING_INTERVAL_TLS_MS : PRESENCE_PING_INTERVAL_MS;
+
     // Presence first: the badge depends on this landing on time, and it is far cheaper than the
     // heartbeat below, which writes to a database in another region.
-    if (lastPingMs == 0 || now - lastPingMs >= PRESENCE_PING_INTERVAL_MS) {
+    if (enrolled && (lastPingMs == 0 || now - lastPingMs >= pingInterval)) {
         lastPingMs = now;
         bool syncRequested = false;
         pingFailures = apiPing(syncRequested) ? 0 : pingFailures + 1;
@@ -430,9 +477,12 @@ void loop() {
         gpsUpdate();
     }
 
-    if (lastHeartbeatMs == 0 || now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
+    if (enrolled && (lastHeartbeatMs == 0 || now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS)) {
         lastHeartbeatMs = now;
         HeartbeatResult heartbeat = apiHeartbeat(stateApiName(state), batteryVolts, gpsFix(), ownerNearby());
+        if (heartbeat.rejected) {
+            enrollNeeded = true;
+        }
         if (heartbeat.ok) {
             if (heartbeat.hasBackupWifi) {
                 netSetBackupWifi(heartbeat.backupSsid, heartbeat.backupPass);

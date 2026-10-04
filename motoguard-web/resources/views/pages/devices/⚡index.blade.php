@@ -5,21 +5,11 @@ use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
-use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
 new #[Title('Devices')] class extends Component {
-    public string $name = '';
-
-    public string $plate_number = '';
-
     public string $serial = '';
-
-    public string $owner_phone = '';
-
-    #[Locked]
-    public ?string $newToken = null;
 
     /**
      * @return Collection<int, Device>
@@ -33,29 +23,34 @@ new #[Title('Devices')] class extends Component {
             ->get();
     }
 
-    public function register(): void
+    /**
+     * Adds a device by the ID built into the board. That one value is all the owner types: the
+     * board proves who it is and collects its own token (see EnrollController), and the
+     * motorcycle's name, plate and SMS number are filled in later on the device page.
+     */
+    public function addDevice(): void
     {
-        $validated = $this->validate([
-            'name' => ['required', 'string', 'max:100'],
-            'plate_number' => ['nullable', 'string', 'max:20'],
-            'serial' => ['required', 'string', 'max:50', 'unique:devices,serial'],
-            'owner_phone' => ['required', 'string', 'regex:/^\+?[0-9]{10,15}$/'],
-        ]);
+        // Forgive how an ID gets typed on a phone: lower case, stray spaces, a missing dash.
+        $serial = strtoupper(preg_replace('/\s+/', '', $this->serial));
+        if (preg_match('/^MG[0-9A-F]{6}$/', $serial)) {
+            $serial = 'MG-'.substr($serial, 2);
+        }
+        $this->serial = $serial;
+
+        $this->validate(
+            ['serial' => ['required', 'string', 'regex:'.Device::SERIAL_PATTERN, 'unique:devices,serial']],
+            [
+                'serial.regex' => __('A device ID looks like MG-04A784: MG, a dash, then six letters or digits (0-9, A-F).'),
+                'serial.unique' => __('This device is already registered.'),
+            ],
+        );
 
         $device = Auth::user()->devices()->create([
-            ...$validated,
-            'plate_number' => $validated['plate_number'] ?: null,
+            'serial' => $serial,
+            'name' => 'MotoGuard '.$serial,
         ]);
 
-        $this->reset('name', 'plate_number', 'serial', 'owner_phone');
-        Flux::modal('register-device')->close();
-
-        $this->showToken($device);
-    }
-
-    public function regenerateToken(int $deviceId): void
-    {
-        $this->showToken(Auth::user()->devices()->findOrFail($deviceId));
+        $this->redirectRoute('devices.show', $device, navigate: true);
     }
 
     public function deleteDevice(int $deviceId): void
@@ -66,28 +61,16 @@ new #[Title('Devices')] class extends Component {
 
         Flux::toast(text: __('Device removed.'), variant: 'success');
     }
-
-    public function clearToken(): void
-    {
-        $this->newToken = null;
-        Flux::modal('device-token')->close();
-    }
-
-    private function showToken(Device $device): void
-    {
-        $this->newToken = $device->issueToken();
-        Flux::modal('device-token')->show();
-    }
 }; ?>
 
 <section class="w-full space-y-6">
     <div class="flex flex-wrap items-center justify-between gap-4">
         <div>
             <flux:heading size="xl" level="1">{{ __('Devices') }}</flux:heading>
-            <flux:text>{{ __('Register each MotoGuard+ unit, then copy its token into the firmware config.') }}</flux:text>
+            <flux:text>{{ __('Add each MotoGuard+ unit by the ID shown on its setup page. A device belongs to one account.') }}</flux:text>
         </div>
         <flux:modal.trigger name="register-device">
-            <flux:button variant="primary" icon="plus">{{ __('Register device') }}</flux:button>
+            <flux:button variant="primary" icon="plus">{{ __('Add device') }}</flux:button>
         </flux:modal.trigger>
     </div>
 
@@ -95,8 +78,8 @@ new #[Title('Devices')] class extends Component {
         <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
             <thead class="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                 <tr>
-                    <th class="px-4 py-3 font-medium">{{ __('Motorcycle') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Serial') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ __('Name') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ __('Device ID') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Owner phone') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Status') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Open alerts') }}</th>
@@ -134,10 +117,6 @@ new #[Title('Devices')] class extends Component {
                                 <flux:dropdown position="bottom" align="end">
                                     <flux:button size="sm" variant="ghost" icon="ellipsis-horizontal" :aria-label="__('More actions')" />
                                     <flux:menu>
-                                        <flux:menu.item icon="key" wire:click="regenerateToken({{ $device->id }})" wire:confirm="{{ __('The ESP32 will stop reporting until you flash the new token. Continue?') }}">
-                                            {{ __('New device token') }}
-                                        </flux:menu.item>
-                                        <flux:menu.separator />
                                         <flux:menu.item icon="trash" variant="danger" wire:click="deleteDevice({{ $device->id }})" wire:confirm="{{ __('Remove this device with all its alerts and GPS history?') }}">
                                             {{ __('Remove device') }}
                                         </flux:menu.item>
@@ -156,40 +135,22 @@ new #[Title('Devices')] class extends Component {
     </div>
 
     <flux:modal name="register-device" class="md:w-96">
-        <form wire:submit="register" class="space-y-6">
+        <form wire:submit="addDevice" class="space-y-6">
             <div>
-                <flux:heading size="lg">{{ __('Register device') }}</flux:heading>
-                <flux:text class="mt-2">{{ __('You will get a token to paste into the ESP32 firmware.') }}</flux:text>
+                <flux:heading size="lg">{{ __('Add device') }}</flux:heading>
+                <flux:text class="mt-2">{{ __('Type the ID of your MotoGuard+ unit. It is shown on the device’s setup page (WiFi “MotoGuard-Setup”).') }}</flux:text>
             </div>
 
-            <flux:input wire:model="name" :label="__('Motorcycle name')" placeholder="Honda Click 125" required />
-            <flux:input wire:model="plate_number" :label="__('Plate number')" placeholder="ABC 1234" />
-            <flux:input wire:model="serial" :label="__('Device serial')" placeholder="MG-0001" required />
-            <flux:input wire:model="owner_phone" :label="__('Owner phone for SMS')" placeholder="+639171234567" required />
+            <flux:input wire:model="serial" :label="__('Device ID')" placeholder="MG-04A784" autocomplete="off" autocapitalize="characters" required />
+
+            <flux:text class="text-sm">{{ __('You can name the motorcycle and add a phone number for SMS afterwards.') }}</flux:text>
 
             <div class="flex justify-end gap-2">
                 <flux:modal.close>
                     <flux:button variant="ghost">{{ __('Cancel') }}</flux:button>
                 </flux:modal.close>
-                <flux:button type="submit" variant="primary">{{ __('Register') }}</flux:button>
+                <flux:button type="submit" variant="primary">{{ __('Add device') }}</flux:button>
             </div>
         </form>
-    </flux:modal>
-
-    <flux:modal name="device-token" class="md:w-[32rem]" wire:close="clearToken">
-        <div class="space-y-4">
-            <flux:heading size="lg">{{ __('Device token') }}</flux:heading>
-            <flux:callout variant="warning" icon="exclamation-triangle" :heading="__('Copy this now. It will not be shown again.')" />
-
-            @if ($newToken)
-                <pre class="select-all whitespace-pre-wrap break-all rounded-lg bg-zinc-100 p-3 font-mono text-xs text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">{{ $newToken }}</pre>
-            @endif
-
-            <flux:text>{!! __('Paste it into :file as :constant.', ['file' => '<code>motoguard-firmware/include/config.h</code>', 'constant' => '<code>DEVICE_TOKEN</code>']) !!}</flux:text>
-
-            <div class="flex justify-end">
-                <flux:button variant="primary" wire:click="clearToken">{{ __('Done') }}</flux:button>
-            </div>
-        </div>
     </flux:modal>
 </section>
