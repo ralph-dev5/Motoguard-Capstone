@@ -26,7 +26,7 @@ new #[Title('Devices')] class extends Component {
     /**
      * Adds a device by the ID built into the board. That one value is all the owner types: the
      * board proves who it is and collects its own token (see EnrollController), and the
-     * motorcycle's name, plate and SMS number are filled in later on the device page.
+     * motorcycle's plate and SMS number are filled in later on the device page.
      */
     public function addDevice(): void
     {
@@ -47,7 +47,8 @@ new #[Title('Devices')] class extends Component {
 
         $device = Auth::user()->devices()->create([
             'serial' => $serial,
-            'name' => 'MotoGuard '.$serial,
+            // A device has no separate name: it is known by its ID everywhere.
+            'name' => $serial,
         ]);
 
         $this->redirectRoute('devices.show', $device, navigate: true);
@@ -78,7 +79,6 @@ new #[Title('Devices')] class extends Component {
         <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
             <thead class="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                 <tr>
-                    <th class="px-4 py-3 font-medium">{{ __('Name') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Device ID') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Owner phone') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Status') }}</th>
@@ -90,10 +90,9 @@ new #[Title('Devices')] class extends Component {
                 @forelse ($this->devices as $device)
                     <tr wire:key="device-{{ $device->id }}">
                         <td class="px-4 py-3">
-                            <a href="{{ route('devices.show', $device) }}" wire:navigate class="font-medium hover:underline">{{ $device->name }}</a>
+                            <a href="{{ route('devices.show', $device) }}" wire:navigate class="font-mono font-medium hover:underline">{{ $device->serial }}</a>
                             <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ $device->plate_number }}</div>
                         </td>
-                        <td class="px-4 py-3 font-mono text-xs">{{ $device->serial }}</td>
                         <td class="px-4 py-3">{{ $device->owner_phone }}</td>
                         <td class="px-4 py-3">
                             <div class="flex flex-wrap items-center gap-1.5">
@@ -127,7 +126,7 @@ new #[Title('Devices')] class extends Component {
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="6" class="px-4 py-10 text-center text-zinc-500 dark:text-zinc-400">{{ __('No devices yet.') }}</td>
+                        <td colspan="5" class="px-4 py-10 text-center text-zinc-500 dark:text-zinc-400">{{ __('No devices yet.') }}</td>
                     </tr>
                 @endforelse
             </tbody>
@@ -143,7 +142,7 @@ new #[Title('Devices')] class extends Component {
 
             <flux:input wire:model="serial" :label="__('Device ID')" placeholder="MG-04A784" autocomplete="off" autocapitalize="characters" required />
 
-            <flux:text class="text-sm">{{ __('You can name the motorcycle and add a phone number for SMS afterwards.') }}</flux:text>
+            <flux:text class="text-sm">{{ __('You can add the plate number and a phone number for SMS afterwards.') }}</flux:text>
 
             <div class="flex justify-end gap-2">
                 <flux:modal.close>

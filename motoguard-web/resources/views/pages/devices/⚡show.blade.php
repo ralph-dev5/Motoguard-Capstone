@@ -26,8 +26,6 @@ new #[Title('Motorcycle')] class extends Component {
 
     public int $zoneRadius = Device::PARKING_RADIUS_DEFAULT;
 
-    public string $name = '';
-
     public string $plate_number = '';
 
     public string $owner_phone = '';
@@ -45,7 +43,6 @@ new #[Title('Motorcycle')] class extends Component {
         $this->device = $device;
         $this->routeDate = $this->routeDate ?: now()->toDateString();
         $this->zoneRadius = $device->parkingRadius();
-        $this->name = $device->name;
         $this->plate_number = (string) $device->plate_number;
         $this->owner_phone = (string) $device->owner_phone;
         $this->owner_beacon = (string) $device->owner_beacon;
@@ -119,7 +116,6 @@ new #[Title('Motorcycle')] class extends Component {
         $this->authorize('update', $this->device);
 
         $validated = $this->validate([
-            'name' => ['required', 'string', 'max:100'],
             'plate_number' => ['nullable', 'string', 'max:20'],
             'owner_phone' => ['nullable', 'string', 'regex:/^\+?[0-9]{10,15}$/'],
             // An iBeacon UUID broadcast by the owner's phone, or the fixed address of a Bluetooth tag.
@@ -463,7 +459,6 @@ new #[Title('Motorcycle')] class extends Component {
 
             <form wire:submit="saveDetails" class="space-y-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
                 <flux:heading>{{ __('Details') }}</flux:heading>
-                <flux:input wire:model="name" :label="__('Motorcycle name')" required />
                 <flux:input wire:model="plate_number" :label="__('Plate number')" />
                 <flux:input wire:model="owner_phone" :label="__('Owner phone for SMS')" placeholder="+639171234567" />
                 <div class="space-y-2">

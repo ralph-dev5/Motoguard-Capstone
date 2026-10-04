@@ -85,7 +85,7 @@ test('a device is added by the ID built into the board', function () {
 
     // Typed loosely, stored in the one canonical form the board reports.
     expect($device->serial)->toBe('MG-04A784')
-        ->and($device->name)->toBe('MotoGuard MG-04A784')
+        ->and($device->name)->toBe('MG-04A784')
         ->and($device->owner_phone)->toBeNull()
         // The board collects its own token when it enrolls; adding the ID issues none.
         ->and($device->tokens()->count())->toBe(0);
