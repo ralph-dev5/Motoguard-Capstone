@@ -4,7 +4,6 @@
 
 #ifdef USE_WIFI
 
-#include <ArduinoOTA.h>
 #include <Preferences.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -136,7 +135,6 @@ static bool joinNetwork(const String& wanted, const String& pass, unsigned long 
     return false;
 }
 
-static void otaBegin();
 
 static bool setupButtonPressed() {
     // GPIO0 is the BOOT button. Holding it during reset enters the flasher, so it is read after boot instead.
@@ -213,28 +211,13 @@ void netBegin() {
 
     if (connected) {
         Serial.println("[net] WiFi connected, ESP32 IP " + WiFi.localIP().toString());
-        otaBegin();
     } else {
         Serial.println("[net] WiFi not connected, will keep retrying");
     }
 }
 
-// This board's USB-serial adapter cannot pull GPIO0 low, so a wired flash needs the BOOT
-// button held by hand. Flashing over WiFi instead: pio run -e esp32dev-wifi-ota -t upload
-static void otaBegin() {
-    ArduinoOTA.setHostname(OTA_HOSTNAME);
-    ArduinoOTA.setPassword(OTA_PASSWORD);
-
-    ArduinoOTA.onStart([] { Serial.println("[ota] update starting"); });
-    ArduinoOTA.onEnd([] { Serial.println("[ota] done, rebooting"); });
-    ArduinoOTA.onError([](ota_error_t error) { Serial.printf("[ota] error %u\n", error); });
-
-    ArduinoOTA.begin();
-    Serial.printf("[ota] ready at %s (%s.local)\n", WiFi.localIP().toString().c_str(), OTA_HOSTNAME);
-}
-
 void netUpdate() {
-    ArduinoOTA.handle();
+    // Nothing to service.
 }
 
 bool netEnsureConnected() {

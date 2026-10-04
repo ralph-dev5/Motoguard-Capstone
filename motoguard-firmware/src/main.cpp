@@ -459,6 +459,15 @@ void loop() {
     serviceEnrollment(now);
     smsUpdate(now);
 
+    // How much memory is left. "lowest ever" is the one to watch: it shows how close the
+    // board has come to running out since it started.
+    static unsigned long lastMemMs = 0;
+    if (now - lastMemMs >= 30000) {
+        lastMemMs = now;
+        Serial.printf("[mem] free %u B, largest block %u B, lowest ever %u B\n",
+                      ESP.getFreeHeap(), ESP.getMaxAllocHeap(), ESP.getMinFreeHeap());
+    }
+
     netUpdate();
     gpsUpdate();
     reportGps(now);

@@ -30,7 +30,7 @@ struct LocationRecord {
     float speedKmh;
     float heading;
     uint8_t satellites;
-    char recordedAt[25];  // GPS clock (UTC); points without one are not kept
+    char recordedAt[21];  // GPS clock (UTC), "2026-10-04T05:12:00Z"; points without one are not kept
 };
 
 void outboxBegin();

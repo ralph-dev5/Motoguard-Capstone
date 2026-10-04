@@ -174,9 +174,10 @@
 #define SMS_STATUS_INTERVAL_MS 30000   // how often the modem's SIM/network status is re-read
 
 // Kept while there is no connection and delivered when it returns.
-#define OUTBOX_MAX_ALERTS 20           // survive a restart (stored in flash)
-#define OUTBOX_MAX_LOCATIONS 240       // in memory: about 40 min of moving, 8 h parked
-#define OUTBOX_LOCATION_BATCH 20        // points per upload (the server accepts up to 50)
+#define OUTBOX_MAX_ALERTS 10           // survive a restart (stored in flash)
+#define OUTBOX_MAX_LOCATIONS 48        // in memory: 8 min of moving, 1.5 h parked. Kept small on
+                                       // purpose: the TLS link and Bluetooth leave little RAM to spare.
+#define OUTBOX_LOCATION_BATCH 12        // points per upload (the server accepts up to 50)
 #define OUTBOX_RETRY_MS 2000
 
 // Bluetooth owner detection (src/owner.cpp). The owner's Bluetooth ID is set on the dashboard.
