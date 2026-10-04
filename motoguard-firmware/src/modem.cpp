@@ -13,6 +13,7 @@
 #include <esp_wifi.h>
 
 #include "settings.h"
+#include "sms.h"
 
 static WiFiClient client;
 // For the online server. Certificates are not checked (setInsecure): the link is encrypted, and
@@ -350,9 +351,8 @@ Client& netClient(bool secure) {
     return client;
 }
 
-bool netSendSms(const char*, const String& message) {
-    Serial.println("[sms] WiFi build has no modem, the server will text the owner: " + message);
-    return false;
+bool netSendSms(const char* number, const String& message) {
+    return smsSend(number, message);
 }
 
 #else

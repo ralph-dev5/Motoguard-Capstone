@@ -34,6 +34,12 @@
     }
 @endphp
 
+@php
+    if (! empty($payload['recorded_offline'])) {
+        $parts[] = __('recorded offline');
+    }
+@endphp
+
 @if ($parts)
     <span {{ $attributes->class('text-xs text-zinc-500 dark:text-zinc-400') }}>{{ implode(' · ', $parts) }}</span>
 @endif

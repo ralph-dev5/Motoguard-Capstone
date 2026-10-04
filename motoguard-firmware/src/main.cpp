@@ -8,9 +8,11 @@
 #include "gps.h"
 #include "modem.h"
 #include "motion.h"
+#include "outbox.h"
 #include "owner.h"
 #include "thresholds.h"
 #include "settings.h"
+#include "sms.h"
 #include "threat.h"
 
 enum class State { Disarmed, Armed, Alert };
@@ -115,6 +117,18 @@ static void applyArmed(bool armed) {
     }
 }
 
+// The number to text, as set on the dashboard, kept so alerts can be sent with no connection.
+static String ownerPhone;
+
+static void applyOwnerPhone(const String& phone) {
+    if (phone == ownerPhone) {
+        return;
+    }
+    ownerPhone = phone;
+    prefs.putString("ownerPhone", phone);
+    Serial.printf("[sms] Owner number %s\n", phone.length() > 0 ? "updated from the dashboard" : "removed");
+}
+
 static void applyOwnerBeacon(const String& key) {
     if (prefs.getString("ownerKey", "") == key) {
         return;
@@ -170,14 +184,44 @@ static void raiseAlert(const char* type, ThreatLevel level, const String& reason
             ? "https://maps.google.com/?q=" + String(fix.lat, 6) + "," + String(fix.lng, 6)
             : String("GPS location not available yet.");
 
-        ownerNotified = netSendSms(OWNER_PHONE, message);
+        if (ownerPhone.length() == 0) {
+            Serial.println("[sms] No text sent: add the owner's phone number on the dashboard (device page, Details)");
+        } else {
+            ownerNotified = netSendSms(ownerPhone.c_str(), message);
+        }
         if (ownerNotified) {
             smsEverSent = true;
             lastSmsMs = millis();
         }
     }
 
-    apiSendAlert(type, threatLevelApiName(level), fix, ownerNotified, evidence);
+    AlertRecord record = {};
+    strlcpy(record.type, type, sizeof(record.type));
+    const char* levelName = threatLevelApiName(level);
+    strlcpy(record.level, levelName ? levelName : "", sizeof(record.level));
+    record.hasFix = fix.valid;
+    record.lat = fix.lat;
+    record.lng = fix.lng;
+    record.smsSent = ownerNotified;
+    if (evidence) {
+        record.hasEvidence = true;
+        record.knocks = evidence->knocks;
+        record.jolts = evidence->jolts;
+        record.maxTiltDeg = evidence->maxTiltDeg;
+        record.durationMs = evidence->durationMs;
+    }
+    record.atMs = millis();
+    record.bootId = outboxBootId();
+    strlcpy(record.gpsTime, fix.timestamp, sizeof(record.gpsTime));
+
+    // Delivered now if the server can be reached; otherwise kept and delivered when it can.
+    // A 422 means the server will never accept it, so there is no point keeping that one.
+    bool online = netNetworkName().length() > 0 && settingsServer().token.length() > 0;
+    int status = online ? apiSendAlert(record, false) : 0;
+    if (!(status >= 200 && status < 300) && status != 422) {
+        outboxAddAlert(record);
+        Serial.printf("[outbox] No connection: alert kept for later (%d waiting)\n", outboxAlertCount());
+    }
 }
 
 static void reportThreat(const ThreatReport& report) {
@@ -266,6 +310,9 @@ void setup() {
     motionReady = motionBegin();
 
     settingsBegin();
+    outboxBegin();
+    ownerPhone = prefs.getString("ownerPhone", "");
+    smsBegin();
     netBegin();
 
     ownerBegin();
@@ -372,10 +419,45 @@ static void serviceEnrollment(unsigned long now) {
     }
 }
 
+/**
+ * Delivers what was recorded while offline, oldest first and a little per pass, so a long
+ * backlog never holds up the pings or the alarm.
+ */
+static void serviceOutbox(unsigned long now) {
+    static unsigned long lastTryMs = 0;
+    if (outboxAlertCount() == 0 && outboxLocationCount() == 0) {
+        return;
+    }
+    if (now - lastTryMs < OUTBOX_RETRY_MS || pingFailures > 0
+        || netNetworkName().length() == 0 || settingsServer().token.length() == 0) {
+        return;
+    }
+    lastTryMs = now;
+
+    AlertRecord alert;
+    if (outboxPeekAlert(alert)) {
+        int status = apiSendAlert(alert, true);
+        if ((status >= 200 && status < 300) || status == 422) {
+            outboxDropAlert();
+            Serial.printf("[outbox] Delivered an alert recorded offline (%d left)\n", outboxAlertCount());
+        }
+        return;
+    }
+
+    static LocationRecord batch[OUTBOX_LOCATION_BATCH];
+    int count = outboxPeekLocations(batch, OUTBOX_LOCATION_BATCH);
+    int status = apiSendLocations(batch, count);
+    if ((status >= 200 && status < 300) || status == 422) {
+        outboxDropLocations(count);
+        Serial.printf("[outbox] Delivered %d GPS point(s) recorded offline (%d left)\n", count, outboxLocationCount());
+    }
+}
+
 void loop() {
     unsigned long now = millis();
     serviceCalibration(now);
     serviceEnrollment(now);
+    smsUpdate(now);
 
     netUpdate();
     gpsUpdate();
@@ -490,6 +572,9 @@ void loop() {
             if (heartbeat.hasOwnerBeacon) {
                 applyOwnerBeacon(heartbeat.ownerBeacon);
             }
+            if (heartbeat.hasOwnerPhone) {
+                applyOwnerPhone(heartbeat.ownerPhone);
+            }
             applyArmed(heartbeat.armed);
             if (heartbeat.calibrate && motionReady && !calibrationActive() && !calibrationUnsent) {
                 calibrationStart();
@@ -504,6 +589,12 @@ void loop() {
 
     if (fix.valid && (lastLocationMs == 0 || now - lastLocationMs >= locationInterval)) {
         lastLocationMs = now;
-        apiSendLocation(fix);
+        // Offline, the point is kept so the route on the dashboard has no gap afterwards.
+        bool online = enrolled && pingFailures == 0 && netNetworkName().length() > 0;
+        if (!online || !apiSendLocation(fix)) {
+            outboxAddLocation(fix);
+        }
     }
+
+    serviceOutbox(now);
 }

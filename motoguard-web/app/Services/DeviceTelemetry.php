@@ -14,6 +14,7 @@ use App\Models\Device;
 use App\Models\LocationLog;
 use App\Support\DevicePresence;
 use App\Support\GeoPoint;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Date;
 
 class DeviceTelemetry
@@ -58,6 +59,9 @@ class DeviceTelemetry
             'armed' => $device->is_armed,
             'calibrate' => $device->calibrationPending(),
             'owner_beacon' => $device->owner_beacon ?? '',
+            // The number the device texts by itself through its SIM, kept on the device so it can
+            // do so with no connection.
+            'owner_phone' => $device->owner_phone ?? '',
             // The owner's phone hotspot, which the device falls back to away from its usual WiFi.
             'backup_wifi' => $device->hotspot_ssid ? ['ssid' => $device->hotspot_ssid, 'password' => (string) $device->hotspot_password] : null,
             'safe_zone' => $device->safeZonePayload(),
@@ -100,10 +104,19 @@ class DeviceTelemetry
      *
      * @param  array<string, mixed>  $payload
      */
-    public function raiseAlert(Device $device, AlertType $type, ?GeoPoint $location, bool $smsSent, array $payload = [], ?AlertLevel $level = null): Alert
+    public function raiseAlert(Device $device, AlertType $type, ?GeoPoint $location, bool $smsSent, array $payload = [], ?AlertLevel $level = null, ?CarbonInterface $occurredAt = null): Alert
     {
-        if ($location !== null) {
+        // $occurredAt is set for an alert the device recorded with no connection and delivers now.
+        // It is filed under the time it happened, and when that was a while ago it is history, not
+        // news: it must not move the motorcycle's pin back or text the owner about an old event.
+        $recordedOffline = $occurredAt !== null;
+        $stale = $recordedOffline && $occurredAt->lt(now()->subMinutes(5));
+
+        if ($location !== null && ! $stale) {
             $device->last_location = $location;
+        }
+        if ($recordedOffline) {
+            $payload['recorded_offline'] = true;
         }
 
         $alarming = $level?->raisesAlarm() ?? true;
@@ -111,13 +124,16 @@ class DeviceTelemetry
         $alert = $device->alerts()->create([
             'type' => $type,
             'level' => $level,
-            'location' => $device->last_location,
+            'location' => $location ?? $device->last_location,
             'payload' => $payload ?: null,
             'sms_sent' => $smsSent,
             // Minor episodes are kept for the record only: already seen, so they never keep the
             // badge red or sit in the "open alerts" count waiting for the owner.
             'acknowledged_at' => $alarming ? null : now(),
         ]);
+        if ($recordedOffline) {
+            $alert->forceFill(['created_at' => $occurredAt])->saveQuietly();
+        }
         $alert->setRelation('device', $device);
 
         if ($alarming) {
@@ -133,7 +149,7 @@ class DeviceTelemetry
         AlertTriggered::dispatch($alert);
         DeviceStatusChanged::dispatch($device);
 
-        if (! $smsSent && $device->owner_phone && ($level?->notifiesOwner() ?? true)) {
+        if (! $smsSent && ! $stale && $device->owner_phone && ($level?->notifiesOwner() ?? true)) {
             SendAlertSms::dispatch($alert);
         }
 

@@ -169,6 +169,15 @@
 #define LOCATION_INTERVAL_MOVING_MS 10000
 #define LOCATION_INTERVAL_PARKED_MS 120000
 #define SMS_COOLDOWN_MS 120000
+// WiFi build: the SIM800L is used for texts only. 9600 is what the module auto-detects reliably.
+#define SMS_MODEM_BAUD 9600
+#define SMS_STATUS_INTERVAL_MS 30000   // how often the modem's SIM/network status is re-read
+
+// Kept while there is no connection and delivered when it returns.
+#define OUTBOX_MAX_ALERTS 20           // survive a restart (stored in flash)
+#define OUTBOX_MAX_LOCATIONS 240       // in memory: about 40 min of moving, 8 h parked
+#define OUTBOX_LOCATION_BATCH 20        // points per upload (the server accepts up to 50)
+#define OUTBOX_RETRY_MS 2000
 
 // Bluetooth owner detection (src/owner.cpp). The owner's Bluetooth ID is set on the dashboard.
 #define OWNER_ABSENT_MS 20000   // owner counts as gone this long after the last beacon heard

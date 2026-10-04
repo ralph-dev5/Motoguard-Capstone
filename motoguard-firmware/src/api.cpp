@@ -171,6 +171,10 @@ HeartbeatResult apiHeartbeat(const char* state, float batteryVolts, const GpsFix
             result.hasOwnerBeacon = true;
             result.ownerBeacon = response["owner_beacon"].as<const char*>();
         }
+        if (response["owner_phone"].is<const char*>()) {
+            result.hasOwnerPhone = true;
+            result.ownerPhone = response["owner_phone"].as<const char*>();
+        }
     }
     return result;
 }
@@ -195,27 +199,56 @@ bool apiSendLocation(const GpsFix& fix) {
     return isSuccess(postJson("/api/v1/device/locations", body, nullptr));
 }
 
-bool apiSendAlert(const char* type, const char* level, const GpsFix& fix, bool smsSent,
-                  const ThreatReport* evidence) {
+int apiSendLocations(const LocationRecord* points, int count) {
+    JsonDocument body;
+    JsonArray locations = body["locations"].to<JsonArray>();
+    for (int i = 0; i < count; i++) {
+        JsonObject location = locations.add<JsonObject>();
+        location["lat"] = points[i].lat;
+        location["lng"] = points[i].lng;
+        location["speed_kmh"] = points[i].speedKmh;
+        location["heading"] = points[i].heading;
+        location["satellites"] = points[i].satellites;
+        location["recorded_at"] = points[i].recordedAt;
+    }
+
+    return postJson("/api/v1/device/locations", body, nullptr);
+}
+
+int apiSendAlert(const AlertRecord& alert, bool late) {
     JsonDocument body;
     JsonObject root = body.to<JsonObject>();
-    root["type"] = type;
-    if (level) {
-        root["level"] = level;
+    root["type"] = alert.type;
+    if (alert.level[0] != '\0') {
+        root["level"] = alert.level;
     }
-    root["sms_sent"] = smsSent;
-    addFix(root, fix);
+    root["sms_sent"] = alert.smsSent;
+    if (alert.hasFix) {
+        root["lat"] = alert.lat;
+        root["lng"] = alert.lng;
+    }
 
     // The evidence behind the classification, so the dashboard can show why it chose the level.
-    if (evidence) {
+    if (alert.hasEvidence) {
         JsonObject payload = root["payload"].to<JsonObject>();
-        payload["knocks"] = evidence->knocks;
-        payload["jolts"] = evidence->jolts;
-        payload["max_tilt_deg"] = roundf(evidence->maxTiltDeg * 10) / 10;
-        payload["duration_ms"] = evidence->durationMs;
+        payload["knocks"] = alert.knocks;
+        payload["jolts"] = alert.jolts;
+        payload["max_tilt_deg"] = roundf(alert.maxTiltDeg * 10) / 10;
+        payload["duration_ms"] = alert.durationMs;
     }
 
-    return isSuccess(postJson("/api/v1/device/alerts", body, nullptr));
+    if (late) {
+        // When it really happened: the GPS clock if it had one, otherwise how long ago, which is
+        // only known if the board has not restarted since.
+        if (alert.gpsTime[0] != '\0') {
+            root["occurred_at"] = alert.gpsTime;
+        } else if (alert.bootId == outboxBootId()) {
+            root["age_s"] = (millis() - alert.atMs) / 1000;
+        }
+        root["recorded_offline"] = true;
+    }
+
+    return postJson("/api/v1/device/alerts", body, nullptr);
 }
 
 // Proof that this is genuine firmware: HMAC-SHA256 of the board's ID with the secret the server

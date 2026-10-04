@@ -2,6 +2,7 @@
 
 #include "calibration.h"
 #include "gps.h"
+#include "outbox.h"
 #include "threat.h"
 
 struct HeartbeatResult {
@@ -14,6 +15,8 @@ struct HeartbeatResult {
     String backupSsid;
     String backupPass;
     bool rejected;        // the server no longer accepts this board's token
+    bool hasOwnerPhone;   // the server sent the number to text (empty when none is set)
+    String ownerPhone;
 };
 
 HeartbeatResult apiHeartbeat(const char* state, float batteryVolts, const GpsFix& fix, bool ownerNearby);
@@ -23,9 +26,11 @@ HeartbeatResult apiHeartbeat(const char* state, float batteryVolts, const GpsFix
 // syncRequested: the dashboard changed something (arm/disarm) that the next heartbeat fetches.
 bool apiPing(bool& syncRequested);
 bool apiSendLocation(const GpsFix& fix);
-// level is null for alerts that are not a motion episode; evidence is null likewise.
-bool apiSendAlert(const char* type, const char* level, const GpsFix& fix, bool smsSent,
-                  const ThreatReport* evidence);
+// Points recorded while offline, oldest first. Returns the HTTP status (zero or less: not reached).
+int apiSendLocations(const LocationRecord* points, int count);
+// late: the alert happened earlier and is being delivered now, so its time travels with it.
+// Returns the HTTP status (zero or less: the server was not reached).
+int apiSendAlert(const AlertRecord& alert, bool late);
 bool apiSendCalibration(const CalibrationResult& result);
 
 enum class EnrollResult {

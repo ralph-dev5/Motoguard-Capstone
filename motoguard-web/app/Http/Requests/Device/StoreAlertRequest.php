@@ -26,6 +26,11 @@ class StoreAlertRequest extends FormRequest
             'lng' => ['nullable', 'required_with:lat', 'numeric', 'between:-180,180'],
             'sms_sent' => ['required', 'boolean'],
             'payload' => ['nullable', 'array', 'max:20'],
+            // An alert recorded while the device had no connection arrives late, with the time it
+            // really happened: the GPS clock, or how long ago when the GPS had no time.
+            'recorded_offline' => ['nullable', 'boolean'],
+            'occurred_at' => ['nullable', 'date', 'before_or_equal:now +5 minutes'],
+            'age_s' => ['nullable', 'integer', 'min:0', 'max:2592000'],
         ];
     }
 }
