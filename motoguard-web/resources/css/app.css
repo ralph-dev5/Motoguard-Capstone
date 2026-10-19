@@ -23,16 +23,18 @@
     --color-zinc-900: #171717;
     --color-zinc-950: #0a0a0a;
 
-    --color-accent: var(--color-neutral-800);
-    --color-accent-content: var(--color-neutral-800);
+    /* Brand colour: a clear security blue, so primary actions stand out from the grey UI
+       instead of being near-black (light) or white (dark) like the starter theme. */
+    --color-accent: var(--color-blue-600);
+    --color-accent-content: var(--color-blue-600);
     --color-accent-foreground: var(--color-white);
 }
 
 @layer theme {
     .dark {
-        --color-accent: var(--color-white);
-        --color-accent-content: var(--color-white);
-        --color-accent-foreground: var(--color-neutral-800);
+        --color-accent: var(--color-blue-500);
+        --color-accent-content: var(--color-blue-400);
+        --color-accent-foreground: var(--color-white);
     }
 }
 
@@ -59,6 +61,35 @@ input:focus[data-flux-control],
 textarea:focus[data-flux-control],
 select:focus[data-flux-control] {
     @apply outline-hidden ring-2 ring-accent ring-offset-2 ring-offset-accent-foreground;
+}
+
+/* Buttons: every button must read as clickable at a glance. */
+[data-flux-button] {
+    @apply font-semibold transition-[background-color,border-color,box-shadow,transform] duration-150;
+}
+
+[data-flux-button]:not(:disabled):active {
+    transform: translateY(1px);
+}
+
+[data-flux-button]:focus-visible {
+    @apply outline-2 outline-offset-2 outline-blue-500;
+}
+
+/* Default (outline) buttons: Flux has no variant hook, so match the class unique to the
+   outline variant. Its stock dark border is almost the colour of the card behind it. */
+[data-flux-button][class~="dark:bg-zinc-700"] {
+    @apply border-zinc-300 shadow-sm hover:border-zinc-400 dark:border-zinc-500 dark:bg-zinc-800 dark:hover:border-zinc-400 dark:hover:bg-zinc-700;
+}
+
+/* Primary buttons get a soft glow in the brand colour so the main action on a page is obvious. */
+[data-flux-button][class*="bg-[var(--color-accent)]"]:not(:disabled) {
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.15), 0 4px 12px -2px color-mix(in oklab, var(--color-accent) 45%, transparent);
+}
+
+/* Cards: one raised surface style shared by the dashboard, devices and alerts pages. */
+.moto-card {
+    @apply rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700/80 dark:bg-zinc-900;
 }
 
 /* \[:where(&)\]:size-4 {

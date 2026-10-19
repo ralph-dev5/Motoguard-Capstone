@@ -161,24 +161,24 @@ new #[Title('Alerts')] class extends Component {
 }; ?>
 
 <section class="w-full space-y-6">
-    <div class="flex flex-wrap items-start justify-between gap-4">
-        <div>
-            <flux:heading size="xl" level="1">{{ __('Alerts') }}</flux:heading>
-            <flux:text>{{ __('Every alert from your motorcycles, newest first.') }}</flux:text>
-        </div>
+    <x-page-header :title="__('Alerts')" :description="__('Every alert from your motorcycles, newest first.')" icon="bell-alert">
         @if ($this->openCounts['total'] > 0)
-            <flux:button
-                icon="check"
-                wire:click="acknowledgeAll"
-                wire:confirm="{{ $this->hasFilters() ? __('Acknowledge every open alert that matches these filters?') : __('Acknowledge all open alerts?') }}"
-            >
-                {{ $this->hasFilters() ? __('Acknowledge matching') : __('Acknowledge all') }}
-            </flux:button>
+            <x-slot:actions>
+                <flux:button
+                    icon="check"
+                    wire:click="acknowledgeAll"
+                    wire:confirm="{{ $this->hasFilters() ? __('Acknowledge every open alert that matches these filters?') : __('Acknowledge all open alerts?') }}"
+                >
+                    {{ $this->hasFilters() ? __('Acknowledge matching') : __('Acknowledge all') }}
+                </flux:button>
+            </x-slot:actions>
         @endif
-    </div>
+    </x-page-header>
 
-    {{-- Open alerts at a glance; each chip is a shortcut to that filter. --}}
-    <div class="flex flex-wrap gap-2">
+    {{-- Shortcuts and filters together in one panel above the list. --}}
+    <div class="moto-card space-y-4 p-4">
+    <div class="flex flex-wrap items-center gap-2">
+        <flux:icon name="funnel" variant="mini" class="size-5 text-zinc-400" />
         @php
             $chip = 'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition hover:opacity-80';
         @endphp
@@ -195,7 +195,7 @@ new #[Title('Alerts')] class extends Component {
             {{ __('Suspicious') }} <span class="tabular-nums">{{ number_format($this->openCounts['suspicious']) }}</span>
         </button>
         @if ($this->hasFilters())
-            <flux:button size="sm" variant="ghost" icon="x-mark" wire:click="clearFilters">{{ __('Clear filters') }}</flux:button>
+            <flux:button size="sm" icon="x-mark" wire:click="clearFilters">{{ __('Clear filters') }}</flux:button>
         @endif
     </div>
 
@@ -227,8 +227,9 @@ new #[Title('Alerts')] class extends Component {
             <flux:select.option value="seen">{{ __('Acknowledged') }}</flux:select.option>
         </flux:select>
     </div>
+    </div>
 
-    <div class="relative overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-700">
+    <div class="moto-card relative overflow-x-auto">
         <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
             <thead class="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                 <tr>
@@ -271,7 +272,7 @@ new #[Title('Alerts')] class extends Component {
                             @if ($alert->acknowledged_at)
                                 <flux:badge size="sm" color="zinc">{{ __('Seen') }}</flux:badge>
                             @else
-                                <flux:button size="sm" wire:click="acknowledge({{ $alert->id }})">{{ __('Acknowledge') }}</flux:button>
+                                <flux:button size="sm" variant="primary" icon="check" wire:click="acknowledge({{ $alert->id }})">{{ __('Acknowledge') }}</flux:button>
                             @endif
                         </td>
                     </tr>

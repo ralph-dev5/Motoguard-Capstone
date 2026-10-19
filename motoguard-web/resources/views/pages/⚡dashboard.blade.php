@@ -170,114 +170,75 @@ new #[Title('Dashboard')] class extends Component {
     over the websocket. This is the slow safety net for everything else on the page (counts,
     alert list, battery) and for browsers where the websocket never connected.
 --}}
-<div class="flex w-full flex-1 flex-col gap-6" wire:poll.60s>
-    <div class="flex flex-wrap items-center justify-between gap-4">
-        <div>
-            <flux:heading size="xl" level="1">{{ __('Dashboard') }}</flux:heading>
-            <flux:text>{{ __('Live status of your motorcycles.') }}</flux:text>
-        </div>
-        <flux:button :href="route('devices.index')" icon="plus" wire:navigate>{{ __('Add device') }}</flux:button>
-    </div>
+<div class="flex w-full flex-1 flex-col gap-8" wire:poll.60s>
+    <x-page-header :title="__('Dashboard')" :description="__('Live status of your motorcycles.')" icon="home">
+        <x-slot:actions>
+            <flux:button variant="primary" :href="route('devices.index')" icon="plus" wire:navigate>{{ __('Add device') }}</flux:button>
+        </x-slot:actions>
+    </x-page-header>
 
-    @php
-        $security = $this->security;
-        $bannerTone = [
-            'bad' => 'border-red-500/40 bg-red-500/10 text-red-900 dark:text-red-100',
-            'warn' => 'border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-100',
-            'good' => 'border-green-500/40 bg-green-500/10 text-green-900 dark:text-green-100',
-            'neutral' => 'border-zinc-300 bg-zinc-100 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100',
-        ][$security['tone']];
-        $bannerIcon = [
-            'bad' => 'text-red-600 dark:text-red-400',
-            'warn' => 'text-amber-600 dark:text-amber-400',
-            'good' => 'text-green-600 dark:text-green-400',
-            'neutral' => 'text-zinc-500 dark:text-zinc-400',
-        ][$security['tone']];
-    @endphp
-    <div role="status" class="flex flex-wrap items-center gap-4 rounded-xl border p-4 {{ $bannerTone }}">
-        <flux:icon :name="$security['icon']" class="size-8 shrink-0 {{ $bannerIcon }}" />
-        <div class="min-w-0 flex-1 basis-52">
-            <div class="font-semibold">{{ $security['title'] }}</div>
-            <div class="text-sm opacity-80">{{ $security['text'] }}</div>
+    <section class="space-y-4">
+        @php
+            $security = $this->security;
+            $bannerTone = [
+                'bad' => 'border-red-500/40 bg-red-500/10 text-red-900 dark:text-red-100',
+                'warn' => 'border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-100',
+                'good' => 'border-green-500/40 bg-green-500/10 text-green-900 dark:text-green-100',
+                'neutral' => 'border-zinc-300 bg-zinc-100 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100',
+            ][$security['tone']];
+            $bannerIcon = [
+                'bad' => 'text-red-600 dark:text-red-400',
+                'warn' => 'text-amber-600 dark:text-amber-400',
+                'good' => 'text-green-600 dark:text-green-400',
+                'neutral' => 'text-zinc-500 dark:text-zinc-400',
+            ][$security['tone']];
+        @endphp
+        <div role="status" class="flex flex-wrap items-center gap-4 rounded-xl border p-4 {{ $bannerTone }}">
+            <flux:icon :name="$security['icon']" class="size-8 shrink-0 {{ $bannerIcon }}" />
+            <div class="min-w-0 flex-1 basis-52">
+                <div class="font-semibold">{{ $security['title'] }}</div>
+                <div class="text-sm opacity-80">{{ $security['text'] }}</div>
+            </div>
+            @if (in_array($security['tone'], ['bad', 'warn']) && $this->devices->sum('open_alerts_count') > 0)
+                <flux:button size="sm" variant="primary" color="red" :href="route('alerts.index', ['state' => 'open'])" wire:navigate icon:trailing="arrow-right">{{ __('Review alerts') }}</flux:button>
+            @elseif ($this->devices->isEmpty())
+                <flux:button size="sm" variant="primary" :href="route('devices.index')" wire:navigate>{{ __('Register device') }}</flux:button>
+            @endif
         </div>
-        @if (in_array($security['tone'], ['bad', 'warn']) && $this->devices->sum('open_alerts_count') > 0)
-            <flux:button size="sm" :href="route('alerts.index', ['state' => 'open'])" wire:navigate icon:trailing="arrow-right">{{ __('Review alerts') }}</flux:button>
-        @elseif ($this->devices->isEmpty())
-            <flux:button size="sm" variant="primary" :href="route('devices.index')" wire:navigate>{{ __('Register device') }}</flux:button>
-        @endif
-    </div>
 
-    <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-        @foreach ($this->stats as $stat)
-            @php
-                $iconTone = [
-                    'bad' => 'bg-red-500/15 text-red-600 dark:text-red-400',
-                    'warn' => 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-                    'good' => 'bg-green-500/15 text-green-600 dark:text-green-400',
-                    'neutral' => 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400',
-                ][$stat['tone']];
-            @endphp
-            <div class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
-                <div class="flex items-center justify-between gap-2">
-                    <flux:text class="text-sm">{{ $stat['label'] }}</flux:text>
-                    <span class="grid size-8 place-items-center rounded-lg {{ $iconTone }}">
-                        <flux:icon :name="$stat['icon']" variant="mini" class="size-4" />
-                    </span>
+
+        <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+            @foreach ($this->stats as $stat)
+                @php
+                    $iconTone = [
+                        'bad' => 'bg-red-500/15 text-red-600 dark:text-red-400',
+                        'warn' => 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+                        'good' => 'bg-green-500/15 text-green-600 dark:text-green-400',
+                        'neutral' => 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400',
+                    ][$stat['tone']];
+                @endphp
+                <div class="moto-card p-4">
+                    <div class="flex items-center justify-between gap-2">
+                        <flux:text class="text-sm">{{ $stat['label'] }}</flux:text>
+                        <span class="grid size-8 place-items-center rounded-lg {{ $iconTone }}">
+                            <flux:icon :name="$stat['icon']" variant="mini" class="size-4" />
+                        </span>
+                    </div>
+                    <div class="mt-1 text-3xl font-semibold tabular-nums {{ $stat['tone'] === 'bad' ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white' }}">{{ number_format($stat['value']) }}</div>
+                    <flux:text class="text-xs">{{ $stat['hint'] }}</flux:text>
                 </div>
-                <div class="mt-1 text-3xl font-semibold tabular-nums {{ $stat['tone'] === 'bad' ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white' }}">{{ number_format($stat['value']) }}</div>
-                <flux:text class="text-xs">{{ $stat['hint'] }}</flux:text>
-            </div>
-        @endforeach
-    </div>
-
-    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 [&>*]:min-w-0">
-        <div class="overflow-hidden rounded-xl border border-zinc-200 lg:col-span-2 dark:border-zinc-700">
-            <div
-                wire:ignore
-                class="h-[420px] w-full"
-                x-data="motoMap({
-                    devices: @js($this->devices->map->livePayload()->values()),
-                    userId: {{ $userId }},
-                    deviceUrl: @js(route('devices.show', '__ID__')),
-                })"
-            ></div>
+            @endforeach
         </div>
 
-        <div class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
-            <div class="mb-3 flex items-center justify-between">
-                <flux:heading>{{ __('Recent alerts') }}</flux:heading>
-                <flux:link :href="route('alerts.index')" wire:navigate class="text-sm">{{ __('View all') }}</flux:link>
-            </div>
+    </section>
 
-            <ul class="divide-y divide-zinc-200 dark:divide-zinc-700">
-                @forelse ($this->recentAlerts as $alert)
-                    <li wire:key="alert-{{ $alert->id }}">
-                        <a href="{{ route('devices.show', $alert->device) }}" wire:navigate class="-mx-2 flex items-start justify-between gap-3 rounded-lg px-2 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-700/50">
-                            <div class="min-w-0">
-                                <div class="flex items-center gap-2 text-sm font-medium text-zinc-900 dark:text-white">
-                                    <x-alert-level :alert="$alert" />
-                                    <span class="truncate">{{ $alert->type->label() }}</span>
-                                </div>
-                                <flux:text class="truncate text-xs">{{ $alert->device->label() }} · {{ $alert->created_at->timezone(config('app.display_timezone'))->format('M j, g:i A') }}</flux:text>
-                                <x-alert-evidence :alert="$alert" class="block truncate" />
-                            </div>
-                            @if ($alert->acknowledged_at)
-                                <flux:badge size="sm" color="zinc">{{ __('Seen') }}</flux:badge>
-                            @else
-                                <flux:badge size="sm" color="red" icon="exclamation-triangle">{{ __('New') }}</flux:badge>
-                            @endif
-                        </a>
-                    </li>
-                @empty
-                    <li class="py-8 text-center"><flux:text>{{ __('No alerts yet.') }}</flux:text></li>
-                @endforelse
-            </ul>
-        </div>
-    </div>
-
+    <section class="space-y-3">
+        <x-section-heading :title="__('My motorcycles')" icon="shield-check">
+            <flux:link :href="route('devices.index')" wire:navigate class="text-sm">{{ __('Manage devices') }}</flux:link>
+        </x-section-heading>
     <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
         @forelse ($this->devices as $device)
-            <div wire:key="device-{{ $device->id }}" class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+            <div wire:key="device-{{ $device->id }}" class="moto-card p-4">
                 <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
                         <a href="{{ route('devices.show', $device) }}" wire:navigate class="block truncate font-semibold text-zinc-900 hover:underline dark:text-white"><span class="font-mono">{{ $device->serial }}</span></a>
@@ -317,7 +278,7 @@ new #[Title('Dashboard')] class extends Component {
                         <flux:icon :name="$device->armState()->icon()" variant="micro" />
                         {{ __($device->armState()->label()) }}
                     </flux:text>
-                    <flux:button size="sm" wire:click="toggleArm({{ $device->id }})" :variant="$device->is_armed ? 'filled' : 'primary'">
+                    <flux:button size="sm" wire:click="toggleArm({{ $device->id }})" variant="primary" :color="$device->is_armed ? 'amber' : 'green'" :icon="$device->is_armed ? 'lock-open' : 'lock-closed'">
                         {{ $device->is_armed ? __('Disarm') : __('Arm') }}
                     </flux:button>
                 </div>
@@ -331,8 +292,60 @@ new #[Title('Dashboard')] class extends Component {
         @endforelse
     </div>
 
-    <div class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
-        <flux:heading>{{ __('Alerts per day') }}</flux:heading>
+    </section>
+
+    <section class="space-y-3">
+        <x-section-heading :title="__('Live map and recent alerts')" icon="map"></x-section-heading>
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 [&>*]:min-w-0">
+        <div class="moto-card overflow-hidden lg:col-span-2">
+            <div
+                wire:ignore
+                class="h-[420px] w-full"
+                x-data="motoMap({
+                    devices: @js($this->devices->map->livePayload()->values()),
+                    userId: {{ $userId }},
+                    deviceUrl: @js(route('devices.show', '__ID__')),
+                })"
+            ></div>
+        </div>
+
+        <div class="moto-card p-4">
+            <div class="mb-3 flex items-center justify-between">
+                <flux:heading class="flex items-center gap-2"><flux:icon name="bell-alert" variant="mini" class="size-5 text-zinc-400" />{{ __('Recent alerts') }}</flux:heading>
+                <flux:link :href="route('alerts.index')" wire:navigate class="text-sm">{{ __('View all') }}</flux:link>
+            </div>
+
+            <ul class="divide-y divide-zinc-200 dark:divide-zinc-700">
+                @forelse ($this->recentAlerts as $alert)
+                    <li wire:key="alert-{{ $alert->id }}">
+                        <a href="{{ route('devices.show', $alert->device) }}" wire:navigate class="-mx-2 flex items-start justify-between gap-3 rounded-lg px-2 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-700/50">
+                            <div class="min-w-0">
+                                <div class="flex items-center gap-2 text-sm font-medium text-zinc-900 dark:text-white">
+                                    <x-alert-level :alert="$alert" />
+                                    <span class="truncate">{{ $alert->type->label() }}</span>
+                                </div>
+                                <flux:text class="truncate text-xs">{{ $alert->device->label() }} · {{ $alert->created_at->timezone(config('app.display_timezone'))->format('M j, g:i A') }}</flux:text>
+                                <x-alert-evidence :alert="$alert" class="block truncate" />
+                            </div>
+                            @if ($alert->acknowledged_at)
+                                <flux:badge size="sm" color="zinc">{{ __('Seen') }}</flux:badge>
+                            @else
+                                <flux:badge size="sm" color="red" icon="exclamation-triangle">{{ __('New') }}</flux:badge>
+                            @endif
+                        </a>
+                    </li>
+                @empty
+                    <li class="py-8 text-center"><flux:text>{{ __('No alerts yet.') }}</flux:text></li>
+                @endforelse
+            </ul>
+        </div>
+    </div>
+
+    </section>
+
+    <section class="space-y-3">
+        <x-section-heading :title="__('Alerts per day')" icon="chart-bar"></x-section-heading>
+    <div class="moto-card p-4">
         <flux:text class="text-sm">{{ __('Last 7 days, all motorcycles') }}</flux:text>
 
         <div wire:ignore class="relative mt-4 h-56">
@@ -348,4 +361,5 @@ new #[Title('Dashboard')] class extends Component {
             </tbody>
         </table>
     </div>
+    </section>
 </div>

@@ -115,6 +115,11 @@ new #[Title('Motorcycle')] class extends Component {
     {
         $this->authorize('update', $this->device);
 
+        // The modem texts exactly what is stored, so a Philippine mobile typed as 09.., 9.. or 639..
+        // is saved as +639..; a 9.. without the 0 otherwise never arrives.
+        $phone = preg_replace('/[\s\-()]/', '', $this->owner_phone);
+        $this->owner_phone = preg_replace('/^(?:\+?63|0)?(9\d{9})$/', '+63$1', $phone);
+
         $validated = $this->validate([
             'plate_number' => ['nullable', 'string', 'max:20'],
             'owner_phone' => ['nullable', 'string', 'regex:/^\+?[0-9]{10,15}$/'],
@@ -183,43 +188,48 @@ new #[Title('Motorcycle')] class extends Component {
 }; ?>
 
 <section class="w-full space-y-6" wire:poll.60s>
-    <div class="flex flex-wrap items-start justify-between gap-4">
-        <div>
+    <x-page-header :title="$device->serial" :description="$device->plate_number ? __('Plate :plate', ['plate' => $device->plate_number]) : __('No plate number yet')" icon="shield-check">
+        <x-slot:before>
             <flux:link :href="route('devices.index')" wire:navigate class="text-sm">&larr; {{ __('Devices') }}</flux:link>
-            <div class="mt-1 flex flex-wrap items-center gap-3">
-                <flux:heading size="xl" level="1" class="font-mono">{{ $device->serial }}</flux:heading>
-                @if ($device->plate_number)
-                    <flux:badge color="zinc" icon="identification">{{ $device->plate_number }}</flux:badge>
-                @endif
-                <x-device-status
-                    :device="$device"
-                    wire:key="presence-{{ $device->id }}"
-                />
-                <x-gps-status :device="$device" />
-                @if ($device->status === DeviceStatus::Alert)
-                    <flux:badge color="red" icon="exclamation-triangle">{{ __('Alert') }}</flux:badge>
-                @endif
-                <flux:badge :icon="$device->armState()->icon()" :color="$device->armState()->color()">{{ __($device->armState()->label()) }}</flux:badge>
-            </div>
-            <flux:text class="mt-1">
-                @unless ($device->plate_number)
-                    {{ __('No plate number yet') }} ·
-                @endunless
-                {{ __('Battery') }} <x-battery :device="$device" class="align-middle" /> ·
-                {{ __('Last seen') }} {{ $device->last_seen_at?->diffForHumans() ?? __('never') }}
-            </flux:text>
-        </div>
-
-        <div class="flex gap-2">
+        </x-slot:before>
+        <x-slot:actions>
             @if ($device->status === DeviceStatus::Alert)
                 <flux:button wire:click="acknowledge" icon="check">{{ __('Acknowledge all') }}</flux:button>
             @endif
-            <flux:button wire:click="toggleArm" :variant="$device->is_armed ? 'filled' : 'primary'" :icon="$device->is_armed ? 'lock-open' : 'lock-closed'">
+            <flux:button wire:click="toggleArm" variant="primary" :color="$device->is_armed ? 'amber' : 'green'" :icon="$device->is_armed ? 'lock-open' : 'lock-closed'">
                 {{ $device->is_armed ? __('Disarm') : __('Arm') }}
             </flux:button>
+        </x-slot:actions>
+    </x-page-header>
+
+    {{-- The unit's health in one row of tiles instead of a line of badges and text. --}}
+    <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6 [&>*]:min-w-0">
+        <div class="moto-card p-3">
+            <flux:text class="text-xs">{{ __('Connection') }}</flux:text>
+            <div class="mt-1.5"><x-device-status :device="$device" wire:key="presence-{{ $device->id }}" /></div>
+        </div>
+        <div class="moto-card p-3">
+            <flux:text class="text-xs">{{ __('Protection') }}</flux:text>
+            <div class="mt-1.5 flex flex-wrap gap-1">
+                <flux:badge :icon="$device->armState()->icon()" :color="$device->armState()->color()">{{ __($device->armState()->label()) }}</flux:badge>
+                @if ($device->status === DeviceStatus::Alert)
+                    <flux:badge color="red" icon="exclamation-triangle">{{ __('Alert') }}</flux:badge>
+                @endif
+            </div>
+        </div>
+        <div class="moto-card p-3">
+            <flux:text class="text-xs">{{ __('GPS') }}</flux:text>
+            <div class="mt-1.5"><x-gps-status :device="$device" /></div>
+        </div>
+        <div class="moto-card p-3">
+            <flux:text class="text-xs">{{ __('Battery') }}</flux:text>
+            <div class="mt-1.5 font-medium text-zinc-900 dark:text-white"><x-battery :device="$device" /></div>
+        </div>
+        <div class="moto-card p-3">
+            <flux:text class="text-xs">{{ __('Last seen') }}</flux:text>
+            <div class="mt-1.5 font-medium text-zinc-900 dark:text-white">{{ $device->last_seen_at?->diffForHumans() ?? __('Never') }}</div>
         </div>
     </div>
-
 
     {{--
         Shown only while the device is silent. The board identifies itself by its built-in ID, so
@@ -273,18 +283,34 @@ new #[Title('Motorcycle')] class extends Component {
         </div>
     @endunless
 
-    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 [&>*]:min-w-0">
-        <div class="space-y-3 lg:col-span-2" x-data="{ view: '2d' }">
+    {{-- Two tabs keep the live view apart from the settings, which are rarely touched. --}}
+    <div x-data="{ tab: 'overview' }" class="space-y-5">
+        <div class="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">
+            <button type="button" role="tab" x-bind:aria-selected="tab === 'overview'"
+                x-on:click="tab = 'overview'; $nextTick(() => window.dispatchEvent(new Event('resize')))"
+                class="-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition"
+                x-bind:class="tab === 'overview' ? 'border-accent text-accent-content' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white'">
+                <flux:icon name="map" variant="mini" class="size-4" /> {{ __('Map & alerts') }}
+            </button>
+            <button type="button" role="tab" x-bind:aria-selected="tab === 'settings'"
+                x-on:click="tab = 'settings'"
+                class="-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition"
+                x-bind:class="tab === 'settings' ? 'border-accent text-accent-content' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white'">
+                <flux:icon name="cog-6-tooth" variant="mini" class="size-4" /> {{ __('Settings') }}
+            </button>
+        </div>
+
+        <div x-show="tab === 'overview'" class="space-y-3" x-data="{ view: '2d' }">
             <div class="flex flex-wrap items-end justify-between gap-3">
-                <flux:heading>{{ __('Live location and route') }}</flux:heading>
+                <flux:heading class="flex items-center gap-2"><flux:icon name="map" variant="mini" class="size-5 text-zinc-400" />{{ __('Live location and route') }}</flux:heading>
                 <div class="flex flex-wrap items-center gap-2">
-                    <div class="inline-flex rounded-lg border border-zinc-200 p-0.5 text-sm dark:border-zinc-700" role="group" aria-label="{{ __('Map view') }}">
+                    <div class="inline-flex rounded-lg border border-zinc-300 bg-zinc-100 p-0.5 text-sm dark:border-zinc-600 dark:bg-zinc-800" role="group" aria-label="{{ __('Map view') }}">
                         <button type="button" x-on:click="view = '2d'" x-bind:aria-pressed="view === '2d'"
                             class="rounded-md px-3 py-1 font-medium"
-                            x-bind:class="view === '2d' ? 'bg-zinc-800 text-white dark:bg-white dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-300'">2D</button>
+                            x-bind:class="view === '2d' ? 'bg-accent text-white shadow-sm' : 'text-zinc-700 hover:bg-zinc-200 dark:text-zinc-200 dark:hover:bg-zinc-700'">2D</button>
                         <button type="button" x-on:click="view = '3d'" x-bind:aria-pressed="view === '3d'"
                             class="rounded-md px-3 py-1 font-medium"
-                            x-bind:class="view === '3d' ? 'bg-zinc-800 text-white dark:bg-white dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-300'">3D</button>
+                            x-bind:class="view === '3d' ? 'bg-accent text-white shadow-sm' : 'text-zinc-700 hover:bg-zinc-200 dark:text-zinc-200 dark:hover:bg-zinc-700'">3D</button>
                     </div>
                     <div class="w-44">
                         <flux:input type="date" wire:model.live="routeDate" size="sm" :aria-label="__('Route date')" />
@@ -292,7 +318,7 @@ new #[Title('Motorcycle')] class extends Component {
                 </div>
             </div>
 
-            <div class="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
+            <div class="moto-card overflow-hidden">
                 <div
                     wire:ignore
                     x-show="view === '2d'"
@@ -335,10 +361,10 @@ new #[Title('Motorcycle')] class extends Component {
 
             <div class="space-y-3 pt-3">
                 <div class="flex items-center justify-between gap-3">
-                    <flux:heading>{{ __('Latest alerts') }}</flux:heading>
+                    <flux:heading class="flex items-center gap-2"><flux:icon name="bell-alert" variant="mini" class="size-5 text-zinc-400" />{{ __('Latest alerts') }}</flux:heading>
                     <flux:link :href="route('alerts.index', ['device' => $device->id])" wire:navigate class="text-sm">{{ __('See all') }}</flux:link>
                 </div>
-                <div class="relative overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <div class="moto-card relative overflow-x-auto">
                     <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
                         <thead class="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                             <tr>
@@ -368,7 +394,7 @@ new #[Title('Motorcycle')] class extends Component {
                                         @if ($alert->acknowledged_at)
                                             <flux:badge size="sm" color="zinc">{{ __('Seen') }}</flux:badge>
                                         @else
-                                            <flux:button size="sm" wire:click="acknowledge({{ $alert->id }})">{{ __('Acknowledge') }}</flux:button>
+                                            <flux:button size="sm" variant="primary" icon="check" wire:click="acknowledge({{ $alert->id }})">{{ __('Acknowledge') }}</flux:button>
                                         @endif
                                     </td>
                                 </tr>
@@ -383,11 +409,11 @@ new #[Title('Motorcycle')] class extends Component {
             </div>
         </div>
 
-        <div class="space-y-4">
-            <div class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+        <div x-show="tab === 'settings'" x-cloak class="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
+            <div class="moto-card p-4">
                 <div class="space-y-3">
                     <div class="flex flex-wrap items-center justify-between gap-2">
-                        <flux:heading>{{ __('Motion calibration') }}</flux:heading>
+                        <flux:heading class="flex items-center gap-2"><flux:icon name="adjustments-horizontal" variant="mini" class="size-5 text-zinc-400" />{{ __('Motion calibration') }}</flux:heading>
                         @if ($device->calibrationPending())
                             <flux:badge size="sm" color="amber" icon="arrow-path">{{ __('Waiting for device') }}</flux:badge>
                         @elseif ($device->calibrated_at)
@@ -424,9 +450,9 @@ new #[Title('Motorcycle')] class extends Component {
                 </div>
             </div>
 
-            <div class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+            <div class="moto-card p-4">
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                    <flux:heading>{{ __('Parking zone') }}</flux:heading>
+                    <flux:heading class="flex items-center gap-2"><flux:icon name="map-pin" variant="mini" class="size-5 text-zinc-400" />{{ __('Parking zone') }}</flux:heading>
                     @if ($device->hasSafeZone())
                         <flux:badge size="sm" color="green" icon="map-pin">{{ __('Active') }}</flux:badge>
                     @elseif ($device->isGuarding())
@@ -454,21 +480,21 @@ new #[Title('Motorcycle')] class extends Component {
                         <label for="zone-radius" class="text-sm font-medium text-zinc-800 dark:text-white">
                             {{ __('Alert after moving') }}: <span class="tabular-nums" x-text="$wire.zoneRadius"></span> m
                         </label>
-                        <input id="zone-radius" type="range" min="50" max="2000" step="50" wire:model.live.debounce.250ms="zoneRadius" class="mt-2 w-full accent-zinc-800 dark:accent-white" />
+                        <input id="zone-radius" type="range" min="50" max="2000" step="50" wire:model.live.debounce.250ms="zoneRadius" class="mt-2 w-full accent-blue-600 dark:accent-blue-500" />
                         <flux:text class="text-xs">{{ __('Keep it at 100 m or more: GPS can drift tens of metres while the motorcycle stands still.') }}</flux:text>
                     </div>
                     <flux:error name="zoneRadius" />
-                    <flux:button size="sm" wire:click="saveZoneRadius">{{ __('Save radius') }}</flux:button>
+                    <flux:button size="sm" variant="primary" wire:click="saveZoneRadius">{{ __('Save radius') }}</flux:button>
                 </div>
             </div>
 
-            <form wire:submit="saveDetails" class="space-y-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
-                <flux:heading>{{ __('Details') }}</flux:heading>
+            <form wire:submit="saveDetails" class="space-y-4 moto-card p-4 lg:col-span-2 xl:col-span-1">
+                <flux:heading class="flex items-center gap-2"><flux:icon name="identification" variant="mini" class="size-5 text-zinc-400" />{{ __('Details') }}</flux:heading>
                 <flux:input wire:model="plate_number" :label="__('Plate number')" />
                 <flux:input wire:model="owner_phone" :label="__('Owner phone for SMS')" placeholder="+639171234567" />
                 <div class="space-y-2">
                     <flux:input wire:model="owner_beacon" :label="__('Owner phone Bluetooth ID')" placeholder="e.g. 5f3c9a2e-…" />
-                    <flux:button type="button" size="xs" variant="ghost" icon="sparkles" wire:click="generateBeacon">{{ __('Generate an ID') }}</flux:button>
+                    <flux:button type="button" size="xs" icon="sparkles" wire:click="generateBeacon">{{ __('Generate an ID') }}</flux:button>
                     <flux:text class="text-xs">{{ __('Broadcast this ID as an iBeacon from your phone (for example with the Beacon Simulator app). While the device hears it, alarms stay silent; it re-arms about 20 seconds after you walk away. A Bluetooth tag’s fixed address also works.') }}</flux:text>
                 </div>
                 <div class="space-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-700">
@@ -478,9 +504,8 @@ new #[Title('Motorcycle')] class extends Component {
                     <flux:input wire:model="hotspot_password" type="password" viewable :label="__('Hotspot password')" autocomplete="new-password" data-1p-ignore data-lpignore="true" />
                     <flux:text class="text-xs">{{ __('Away from its usual WiFi, or when the server moves to this hotspot, the device switches to it by itself. It receives it on its next check-in, within 30 seconds. iPhone: turn on "Maximize Compatibility" in Personal Hotspot, because the device only uses 2.4 GHz.') }}</flux:text>
                 </div>
-                <flux:button type="submit" size="sm">{{ __('Save details') }}</flux:button>
+                <flux:button type="submit" size="sm" variant="primary">{{ __('Save details') }}</flux:button>
             </form>
         </div>
     </div>
-
 </section>

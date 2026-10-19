@@ -65,17 +65,15 @@ new #[Title('Devices')] class extends Component {
 }; ?>
 
 <section class="w-full space-y-6">
-    <div class="flex flex-wrap items-center justify-between gap-4">
-        <div>
-            <flux:heading size="xl" level="1">{{ __('Devices') }}</flux:heading>
-            <flux:text>{{ __('Add each MotoGuard+ unit by the ID shown on its setup page. A device belongs to one account.') }}</flux:text>
-        </div>
-        <flux:modal.trigger name="register-device">
-            <flux:button variant="primary" icon="plus">{{ __('Add device') }}</flux:button>
-        </flux:modal.trigger>
-    </div>
+    <x-page-header :title="__('Devices')" :description="__('Add each MotoGuard+ unit by the ID shown on its setup page. A device belongs to one account.')" icon="map-pin">
+        <x-slot:actions>
+            <flux:modal.trigger name="register-device">
+                <flux:button variant="primary" icon="plus">{{ __('Add device') }}</flux:button>
+            </flux:modal.trigger>
+        </x-slot:actions>
+    </x-page-header>
 
-    <div class="relative overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-700">
+    <div class="moto-card relative overflow-x-auto">
         <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
             <thead class="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                 <tr>
@@ -115,10 +113,10 @@ new #[Title('Devices')] class extends Component {
                         </td>
                         <td class="px-4 py-3">
                             <div class="flex justify-end gap-2">
-                                <flux:button size="sm" :href="route('devices.show', $device)" wire:navigate>{{ __('Open') }}</flux:button>
+                                <flux:button size="sm" variant="primary" icon:trailing="arrow-right" :href="route('devices.show', $device)" wire:navigate>{{ __('Open') }}</flux:button>
                                 {{-- Rare and destructive actions live behind a menu so they are never one stray click away. --}}
                                 <flux:dropdown position="bottom" align="end">
-                                    <flux:button size="sm" variant="ghost" icon="ellipsis-horizontal" :aria-label="__('More actions')" />
+                                    <flux:button size="sm" icon="ellipsis-horizontal" :aria-label="__('More actions')" />
                                     <flux:menu>
                                         <flux:menu.item icon="trash" variant="danger" wire:click="deleteDevice({{ $device->id }})" wire:confirm="{{ __('Remove this device with all its alerts and GPS history?') }}">
                                             {{ __('Remove device') }}
@@ -150,7 +148,7 @@ new #[Title('Devices')] class extends Component {
 
             <div class="flex justify-end gap-2">
                 <flux:modal.close>
-                    <flux:button variant="ghost">{{ __('Cancel') }}</flux:button>
+                    <flux:button>{{ __('Cancel') }}</flux:button>
                 </flux:modal.close>
                 <flux:button type="submit" variant="primary">{{ __('Add device') }}</flux:button>
             </div>
