@@ -82,9 +82,9 @@ select:focus[data-flux-control] {
     @apply border-zinc-300 shadow-sm hover:border-zinc-400 dark:border-zinc-500 dark:bg-zinc-800 dark:hover:border-zinc-400 dark:hover:bg-zinc-700;
 }
 
-/* Primary buttons get a soft glow in the brand colour so the main action on a page is obvious. */
-[data-flux-button][class*="bg-[var(--color-accent)]"]:not(:disabled) {
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.15), 0 4px 12px -2px color-mix(in oklab, var(--color-accent) 45%, transparent);
+/* Primary buttons stay flat: solid colour only, no glow or inner highlight. */
+[data-flux-button][class*="bg-[var(--color-accent)]"] {
+    box-shadow: none;
 }
 
 /* Cards: one raised surface style shared by the dashboard, devices and alerts pages. */
