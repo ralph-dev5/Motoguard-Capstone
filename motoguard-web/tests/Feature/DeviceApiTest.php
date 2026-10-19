@@ -363,3 +363,25 @@ test('enrolling is refused outright when no secret is configured', function () {
         'proof' => hash_hmac('sha256', 'MG-04A784', ''),
     ])->assertForbidden();
 });
+
+test('a device marks its own alert as texted after a late retry', function () {
+    $device = Device::factory()->create();
+    $alert = $device->alerts()->create(['type' => AlertType::Movement, 'level' => AlertLevel::TheftAttempt, 'sms_sent' => false]);
+
+    $this->withToken($device->issueToken())
+        ->postJson(route('api.device.alerts.sms-sent', $alert))
+        ->assertOk();
+
+    expect($alert->fresh()->sms_sent)->toBeTrue();
+});
+
+test('a device cannot mark another device alert as texted', function () {
+    $other = Device::factory()->create();
+    $alert = $other->alerts()->create(['type' => AlertType::Movement, 'sms_sent' => false]);
+
+    $this->withToken(Device::factory()->create()->issueToken())
+        ->postJson(route('api.device.alerts.sms-sent', $alert))
+        ->assertNotFound();
+
+    expect($alert->fresh()->sms_sent)->toBeFalse();
+});

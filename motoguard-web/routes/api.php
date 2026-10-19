@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Device\AlertController;
+use App\Http\Controllers\Api\Device\AlertSmsSentController;
 use App\Http\Controllers\Api\Device\CalibrationController;
 use App\Http\Controllers\Api\Device\EnrollController;
 use App\Http\Controllers\Api\Device\HeartbeatController;
@@ -28,5 +29,6 @@ Route::prefix('v1/device')
         Route::post('heartbeat', HeartbeatController::class)->name('heartbeat');
         Route::post('locations', LocationController::class)->name('locations');
         Route::post('alerts', AlertController::class)->name('alerts');
+        Route::post('alerts/{alert}/sms-sent', AlertSmsSentController::class)->name('alerts.sms-sent');
         Route::post('calibration', CalibrationController::class)->name('calibration');
     });
