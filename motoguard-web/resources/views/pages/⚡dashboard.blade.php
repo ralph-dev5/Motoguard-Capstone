@@ -44,7 +44,9 @@ new #[Title('Dashboard')] class extends Component {
         $total = $this->devices->count();
 
         return [
-            ['label' => __('Online'), 'value' => $online, 'icon' => 'signal', 'tone' => $online ? 'good' : 'neutral', 'hint' => __('of :total motorcycles', ['total' => $total])],
+            // A plain online/offline sign rather than a count; the count only helps with several units.
+            ['label' => __('Device'), 'value' => $online, 'sign' => $online ? __('Online') : __('Offline'), 'icon' => $online ? 'signal' : 'signal-slash', 'tone' => $online ? 'good' : 'neutral',
+                'hint' => $total > 1 ? __(':online of :total online', ['online' => $online, 'total' => $total]) : ($online ? __('connected and reporting') : __('not connected'))],
             ['label' => __('Protected'), 'value' => $armed, 'icon' => 'lock-closed', 'tone' => $armed ? 'good' : 'neutral', 'hint' => __('armed and watching')],
             ['label' => __('Alerts to check'), 'value' => $open, 'icon' => 'bell-alert', 'tone' => $open ? 'bad' : 'neutral', 'hint' => $open ? __('tap Review alerts') : __('all caught up')],
         ];
@@ -147,11 +149,7 @@ new #[Title('Dashboard')] class extends Component {
     alert list, battery) and for browsers where the websocket never connected.
 --}}
 <div class="flex w-full flex-1 flex-col gap-8" wire:poll.60s>
-    <x-page-header :title="__('Dashboard')" :description="__('Live status of your motorcycles.')" icon="home">
-        <x-slot:actions>
-            <flux:button variant="primary" :href="route('devices.index')" icon="plus" wire:navigate>{{ __('Add device') }}</flux:button>
-        </x-slot:actions>
-    </x-page-header>
+    <x-page-header :title="__('Dashboard')" :description="__('Live status of your motorcycles.')" icon="home" />
 
     <section class="space-y-4">
         @php
@@ -200,7 +198,14 @@ new #[Title('Dashboard')] class extends Component {
                             <flux:icon :name="$stat['icon']" variant="mini" class="size-4" />
                         </span>
                     </div>
-                    <div class="mt-1 text-3xl font-semibold tabular-nums {{ $stat['tone'] === 'bad' ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white' }}">{{ number_format($stat['value']) }}</div>
+                    @isset($stat['sign'])
+                        <div class="mt-1 flex items-center gap-2 text-3xl font-semibold {{ $stat['tone'] === 'good' ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-zinc-400' }}">
+                            <span class="size-3 rounded-full {{ $stat['tone'] === 'good' ? 'bg-green-500' : 'bg-zinc-400 dark:bg-zinc-500' }}"></span>
+                            {{ $stat['sign'] }}
+                        </div>
+                    @else
+                        <div class="mt-1 text-3xl font-semibold tabular-nums {{ $stat['tone'] === 'bad' ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white' }}">{{ number_format($stat['value']) }}</div>
+                    @endisset
                     <flux:text class="text-xs">{{ $stat['hint'] }}</flux:text>
                 </div>
             @endforeach
