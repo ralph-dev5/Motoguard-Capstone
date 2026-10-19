@@ -41,15 +41,12 @@ new #[Title('Dashboard')] class extends Component {
         $online = $this->devices->filter->isRecentlySeen()->count();
         $armed = $this->devices->filter(fn (Device $device) => $device->armState()->isGuarding())->count();
         $open = (int) $this->devices->sum('open_alerts_count');
-        $charging = $this->devices->filter(fn (Device $device) => $device->battery()?->needsCharge())->count();
         $total = $this->devices->count();
 
         return [
-            ['label' => __('Motorcycles'), 'value' => $total, 'icon' => 'map-pin', 'tone' => 'neutral', 'hint' => __('registered')],
-            ['label' => __('Online now'), 'value' => $online, 'icon' => 'signal', 'tone' => $online ? 'good' : 'neutral', 'hint' => __('of :total reporting', ['total' => $total])],
-            ['label' => __('Armed'), 'value' => $armed, 'icon' => 'lock-closed', 'tone' => $armed ? 'good' : 'neutral', 'hint' => __('watching for movement')],
-            ['label' => __('Open alerts'), 'value' => $open, 'icon' => 'bell-alert', 'tone' => $open ? 'bad' : 'neutral', 'hint' => $open ? __('waiting for you') : __('all caught up')],
-            ['label' => __('Needs charging'), 'value' => $charging, 'icon' => 'battery-50', 'tone' => $charging ? 'warn' : 'neutral', 'hint' => __('backup battery low')],
+            ['label' => __('Online'), 'value' => $online, 'icon' => 'signal', 'tone' => $online ? 'good' : 'neutral', 'hint' => __('of :total motorcycles', ['total' => $total])],
+            ['label' => __('Protected'), 'value' => $armed, 'icon' => 'lock-closed', 'tone' => $armed ? 'good' : 'neutral', 'hint' => __('armed and watching')],
+            ['label' => __('Alerts to check'), 'value' => $open, 'icon' => 'bell-alert', 'tone' => $open ? 'bad' : 'neutral', 'hint' => $open ? __('tap Review alerts') : __('all caught up')],
         ];
     }
 
@@ -112,32 +109,11 @@ new #[Title('Dashboard')] class extends Component {
         // Reuse the devices already loaded above instead of querying them again.
         return Alert::query()
             ->whereIn('device_id', $this->devices->modelKeys())
+            ->where(fn ($query) => $query->whereNull('level')->orWhere('level', '!=', AlertLevel::Minor->value))
             ->latest()
-            ->limit(8)
+            ->limit(5)
             ->get()
             ->each(fn (Alert $alert) => $alert->setRelation('device', $this->devices->find($alert->device_id)));
-    }
-
-    /**
-     * @return array{labels: list<string>, dates: list<string>, counts: list<int>}
-     */
-    #[Computed]
-    public function alertsPerDay(): array
-    {
-        $counts = Alert::query()
-            ->whereIn('device_id', $this->devices->modelKeys())
-            ->where('created_at', '>=', now()->subDays(6)->startOfDay())
-            ->selectRaw('date(created_at) as day, count(*) as total')
-            ->groupBy('day')
-            ->pluck('total', 'day');
-
-        $days = collect(range(6, 0))->map(fn (int $daysAgo) => now()->subDays($daysAgo));
-
-        return [
-            'labels' => $days->map(fn ($day) => $day->format('D j'))->all(),
-            'dates' => $days->map(fn ($day) => $day->format('l, M j'))->all(),
-            'counts' => $days->map(fn ($day) => (int) ($counts[$day->toDateString()] ?? 0))->all(),
-        ];
     }
 
     public function toggleArm(int $deviceId): void
@@ -207,7 +183,7 @@ new #[Title('Dashboard')] class extends Component {
         </div>
 
 
-        <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
             @foreach ($this->stats as $stat)
                 @php
                     $iconTone = [
@@ -258,20 +234,7 @@ new #[Title('Dashboard')] class extends Component {
                     </div>
                 </div>
 
-                <dl class="mt-4 grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                        <dt class="text-zinc-500 dark:text-zinc-400">{{ __('Battery') }}</dt>
-                        <dd class="font-medium"><x-battery :device="$device" /></dd>
-                    </div>
-                    <div>
-                        <dt class="text-zinc-500 dark:text-zinc-400">{{ __('Last seen') }}</dt>
-                        <dd class="font-medium text-zinc-900 dark:text-white">{{ $device->last_seen_at?->diffForHumans() ?? __('Never') }}</dd>
-                    </div>
-                    <div class="col-span-2">
-                        <dt class="text-zinc-500 dark:text-zinc-400">{{ __('GPS') }}</dt>
-                        <dd class="mt-0.5"><x-gps-status :device="$device" size="sm" /></dd>
-                    </div>
-                </dl>
+                <flux:text class="mt-3 text-sm">{{ __('Last seen') }} <span class="font-medium text-zinc-900 dark:text-white">{{ $device->last_seen_at?->diffForHumans() ?? __('never') }}</span></flux:text>
 
                 <div class="mt-4 flex items-center justify-between gap-2">
                     <flux:text class="flex items-center gap-1 text-sm">
@@ -295,7 +258,7 @@ new #[Title('Dashboard')] class extends Component {
     </section>
 
     <section class="space-y-3">
-        <x-section-heading :title="__('Live map and recent alerts')" icon="map"></x-section-heading>
+        <x-section-heading :title="__('Where it is now')" icon="map"></x-section-heading>
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 [&>*]:min-w-0">
         <div class="moto-card overflow-hidden lg:col-span-2">
             <div
@@ -311,7 +274,7 @@ new #[Title('Dashboard')] class extends Component {
 
         <div class="moto-card p-4">
             <div class="mb-3 flex items-center justify-between">
-                <flux:heading class="flex items-center gap-2"><flux:icon name="bell-alert" variant="mini" class="size-5 text-zinc-400" />{{ __('Recent alerts') }}</flux:heading>
+                <flux:heading class="flex items-center gap-2"><flux:icon name="bell-alert" variant="mini" class="size-5 text-zinc-400" />{{ __('Latest warnings') }}</flux:heading>
                 <flux:link :href="route('alerts.index')" wire:navigate class="text-sm">{{ __('View all') }}</flux:link>
             </div>
 
@@ -335,31 +298,11 @@ new #[Title('Dashboard')] class extends Component {
                         </a>
                     </li>
                 @empty
-                    <li class="py-8 text-center"><flux:text>{{ __('No alerts yet.') }}</flux:text></li>
+                    <li class="py-8 text-center"><flux:text>{{ __('Nothing suspicious so far.') }}</flux:text></li>
                 @endforelse
             </ul>
         </div>
     </div>
 
-    </section>
-
-    <section class="space-y-3">
-        <x-section-heading :title="__('Alerts per day')" icon="chart-bar"></x-section-heading>
-    <div class="moto-card p-4">
-        <flux:text class="text-sm">{{ __('Last 7 days, all motorcycles') }}</flux:text>
-
-        <div wire:ignore class="relative mt-4 h-56">
-            <canvas x-data="alertsChart(@js($this->alertsPerDay))" role="img" aria-label="{{ __('Bar chart of alerts per day for the last 7 days') }}"></canvas>
-        </div>
-
-        <table class="sr-only">
-            <caption>{{ __('Alerts per day') }}</caption>
-            <tbody>
-                @foreach ($this->alertsPerDay['dates'] as $i => $date)
-                    <tr><th scope="row">{{ $date }}</th><td>{{ $this->alertsPerDay['counts'][$i] }}</td></tr>
-                @endforeach
-            </tbody>
-        </table>
-    </div>
     </section>
 </div>

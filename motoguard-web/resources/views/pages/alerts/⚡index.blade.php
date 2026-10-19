@@ -34,6 +34,10 @@ new #[Title('Alerts')] class extends Component {
     #[Url]
     public string $state = '';
 
+    /** Minor bumps are stored already acknowledged and would bury the alerts that matter. */
+    #[Url]
+    public bool $minor = false;
+
     public function mount(): void
     {
         $this->userId = (int) Auth::id();
@@ -41,7 +45,7 @@ new #[Title('Alerts')] class extends Component {
 
     public function updated(string $property): void
     {
-        if (in_array($property, ['device', 'type', 'level', 'state'], true)) {
+        if (in_array($property, ['device', 'type', 'level', 'state', 'minor'], true)) {
             $this->resetPage();
         }
     }
@@ -66,7 +70,10 @@ new #[Title('Alerts')] class extends Component {
             ->whereIn('device_id', $this->devices->modelKeys())
             ->when($this->device !== '', fn ($query) => $query->where('device_id', (int) $this->device))
             ->when(AlertType::tryFrom($this->type), fn ($query, AlertType $type) => $query->where('type', $type))
-            ->when(AlertLevel::tryFrom($this->level), fn ($query, AlertLevel $level) => $query->where('level', $level));
+            ->when(AlertLevel::tryFrom($this->level), fn ($query, AlertLevel $level) => $query->where('level', $level))
+            ->when($this->level === '' && ! $this->minor, fn ($query) => $query->where(
+                fn ($query) => $query->whereNull('level')->orWhere('level', '!=', AlertLevel::Minor->value),
+            ));
     }
 
     /**
@@ -176,9 +183,8 @@ new #[Title('Alerts')] class extends Component {
     </x-page-header>
 
     {{-- Shortcuts and filters together in one panel above the list. --}}
-    <div class="moto-card space-y-4 p-4">
+    <div class="moto-card p-4" x-data="{ more: @js($device !== '' || $type !== '') }">
     <div class="flex flex-wrap items-center gap-2">
-        <flux:icon name="funnel" variant="mini" class="size-5 text-zinc-400" />
         @php
             $chip = 'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition hover:opacity-80';
         @endphp
@@ -194,12 +200,18 @@ new #[Title('Alerts')] class extends Component {
             <span class="size-2 rounded-full bg-amber-500"></span>
             {{ __('Suspicious') }} <span class="tabular-nums">{{ number_format($this->openCounts['suspicious']) }}</span>
         </button>
-        @if ($this->hasFilters())
-            <flux:button size="sm" icon="x-mark" wire:click="clearFilters">{{ __('Clear filters') }}</flux:button>
-        @endif
+        <div class="ms-auto flex flex-wrap items-center gap-3">
+            <flux:switch wire:model.live="minor" :label="__('Show minor bumps')" align="left" />
+            @if ($this->hasFilters())
+                <flux:button size="sm" icon="x-mark" wire:click="clearFilters">{{ __('Clear filters') }}</flux:button>
+            @endif
+            <flux:button size="sm" icon="funnel" x-on:click="more = ! more">
+                <span x-text="more ? @js(__('Fewer filters')) : @js(__('More filters'))">{{ __('More filters') }}</span>
+            </flux:button>
+        </div>
     </div>
 
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" x-show="more" x-cloak>
         <flux:select wire:model.live="device" :label="__('Motorcycle')">
             <flux:select.option value="">{{ __('All motorcycles') }}</flux:select.option>
             @foreach ($this->devices as $option)
@@ -234,10 +246,12 @@ new #[Title('Alerts')] class extends Component {
             <thead class="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                 <tr>
                     <th class="px-4 py-3 font-medium">{{ __('Alert') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Motorcycle') }}</th>
+                    @if ($this->devices->count() > 1)
+                        <th class="px-4 py-3 font-medium">{{ __('Motorcycle') }}</th>
+                    @endif
                     <th class="px-4 py-3 font-medium">{{ __('When') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Location') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('SMS') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ __('Text message') }}</th>
                     <th class="px-4 py-3"><span class="sr-only">{{ __('Actions') }}</span></th>
                 </tr>
             </thead>
@@ -260,9 +274,11 @@ new #[Title('Alerts')] class extends Component {
                             </div>
                             <x-alert-evidence :alert="$alert" class="mt-0.5 block font-normal" />
                         </td>
-                        <td class="px-4 py-3">
-                            <a href="{{ route('devices.show', $alert->device) }}" wire:navigate class="hover:underline">{{ $alert->device->label() }}</a>
-                        </td>
+                        @if ($this->devices->count() > 1)
+                            <td class="px-4 py-3">
+                                <a href="{{ route('devices.show', $alert->device) }}" wire:navigate class="hover:underline">{{ $alert->device->label() }}</a>
+                            </td>
+                        @endif
                         <td class="px-4 py-3"><x-alert-time :alert="$alert" /></td>
                         <td class="whitespace-nowrap px-4 py-3">
                             <x-alert-location :alert="$alert" />
@@ -278,7 +294,7 @@ new #[Title('Alerts')] class extends Component {
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="6" class="px-4 py-10 text-center text-zinc-500 dark:text-zinc-400">{{ __('No alerts match these filters.') }}</td>
+                        <td colspan="{{ $this->devices->count() > 1 ? 6 : 5 }}" class="px-4 py-10 text-center text-zinc-500 dark:text-zinc-400">{{ __('No alerts match these filters.') }}</td>
                     </tr>
                 @endforelse
             </tbody>

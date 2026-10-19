@@ -208,7 +208,7 @@ new #[Title('Motorcycle')] class extends Component {
             <flux:text class="text-xs">{{ __('Connection') }}</flux:text>
             <div class="mt-1.5"><x-device-status :device="$device" wire:key="presence-{{ $device->id }}" /></div>
         </div>
-        <div class="moto-card p-3">
+        <div class="moto-card col-span-2 p-3 md:col-span-1 xl:col-span-2">
             <flux:text class="text-xs">{{ __('Protection') }}</flux:text>
             <div class="mt-1.5 flex flex-wrap gap-1">
                 <flux:badge :icon="$device->armState()->icon()" :color="$device->armState()->color()">{{ __($device->armState()->label()) }}</flux:badge>
@@ -356,8 +356,8 @@ new #[Title('Motorcycle')] class extends Component {
                     </template>
                 </div>
             </div>
-            <flux:text class="text-xs" x-show="view === '2d'">{{ __('Blue line: route for the selected day. Dashed circle: the parking zone while armed.') }}</flux:text>
-            <flux:text class="text-xs" x-show="view === '3d'" x-cloak>{{ __('3D view follows the motorcycle as live positions arrive. Drag to look around, right-drag or Ctrl+drag to tilt and rotate.') }}</flux:text>
+            <flux:text class="text-xs" x-show="view === '2d'">{{ __('Blue line: where it went on the chosen day. Dashed circle: parking area.') }}</flux:text>
+            <flux:text class="text-xs" x-show="view === '3d'" x-cloak>{{ __('Drag to look around. Right-drag to tilt.') }}</flux:text>
 
             <div class="space-y-3 pt-3">
                 <div class="flex items-center justify-between gap-3">
@@ -427,10 +427,12 @@ new #[Title('Motorcycle')] class extends Component {
                         <div wire:poll.5s="refreshDevice"></div>
                         <flux:text class="text-sm">{{ __('Keep the motorcycle completely still. The device beeps once when it starts measuring and twice when it is done.') }}</flux:text>
                     @else
-                        <flux:text class="text-sm">{{ __('Measures this unit’s own resting noise for 15 seconds and sets the thresholds just above it, so noise never counts as a touch but a real touch always does. Run it again after mounting or moving the device.') }}</flux:text>
+                        <flux:text class="text-sm">{{ __('Keep the motorcycle still and press Calibrate. It takes 15 seconds and stops small vibrations from setting off alarms. Do it again after moving the device.') }}</flux:text>
                     @endif
 
                     @if ($thresholds = $device->motionThresholds())
+                        <details class="text-sm">
+                        <summary class="cursor-pointer text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white">{{ __('Technical details') }}</summary>
                         <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
                             <dt class="text-zinc-500 dark:text-zinc-400">{{ __('Resting noise') }}</dt>
                             <dd class="tabular-nums text-zinc-900 dark:text-white">
@@ -442,6 +444,7 @@ new #[Title('Motorcycle')] class extends Component {
                             </dd>
                         </dl>
                         <flux:text class="text-xs">{{ __('All values in m/s².') }}</flux:text>
+                        </details>
                     @endif
 
                     <flux:button size="sm" icon="adjustments-horizontal" wire:click="requestCalibration" :disabled="$device->calibrationPending()">
@@ -461,7 +464,7 @@ new #[Title('Motorcycle')] class extends Component {
                         <flux:badge size="sm" color="zinc">{{ __('Off') }}</flux:badge>
                     @endif
                 </div>
-                <flux:text class="mt-1 text-sm">{{ __('Set automatically where the motorcycle is parked when it is armed. If it is moved out of this circle, you get an alert and an SMS, even if it was lifted too gently for the motion sensors.') }}</flux:text>
+                <flux:text class="mt-1 text-sm">{{ __('When you arm it, the spot where it is parked is saved. If the motorcycle leaves that area, you get an alert and a text message.') }}</flux:text>
 
                 <flux:text class="mt-3 text-sm">
                     @if ($device->hasSafeZone())
@@ -481,7 +484,7 @@ new #[Title('Motorcycle')] class extends Component {
                             {{ __('Alert after moving') }}: <span class="tabular-nums" x-text="$wire.zoneRadius"></span> m
                         </label>
                         <input id="zone-radius" type="range" min="50" max="2000" step="50" wire:model.live.debounce.250ms="zoneRadius" class="mt-2 w-full accent-blue-600 dark:accent-blue-500" />
-                        <flux:text class="text-xs">{{ __('Keep it at 100 m or more: GPS can drift tens of metres while the motorcycle stands still.') }}</flux:text>
+                        <flux:text class="text-xs">{{ __('100 m or more is best, because GPS can drift a little.') }}</flux:text>
                     </div>
                     <flux:error name="zoneRadius" />
                     <flux:button size="sm" variant="primary" wire:click="saveZoneRadius">{{ __('Save radius') }}</flux:button>
@@ -491,18 +494,18 @@ new #[Title('Motorcycle')] class extends Component {
             <form wire:submit="saveDetails" class="space-y-4 moto-card p-4 lg:col-span-2 xl:col-span-1">
                 <flux:heading class="flex items-center gap-2"><flux:icon name="identification" variant="mini" class="size-5 text-zinc-400" />{{ __('Details') }}</flux:heading>
                 <flux:input wire:model="plate_number" :label="__('Plate number')" />
-                <flux:input wire:model="owner_phone" :label="__('Owner phone for SMS')" placeholder="+639171234567" />
+                <flux:input wire:model="owner_phone" :label="__('Phone number for text alerts')" placeholder="09171234567" />
                 <div class="space-y-2">
-                    <flux:input wire:model="owner_beacon" :label="__('Owner phone Bluetooth ID')" placeholder="e.g. 5f3c9a2e-…" />
+                    <flux:input wire:model="owner_beacon" :label="__('Your phone’s Bluetooth ID (optional)')" placeholder="e.g. 5f3c9a2e-…" />
                     <flux:button type="button" size="xs" icon="sparkles" wire:click="generateBeacon">{{ __('Generate an ID') }}</flux:button>
-                    <flux:text class="text-xs">{{ __('Broadcast this ID as an iBeacon from your phone (for example with the Beacon Simulator app). While the device hears it, alarms stay silent; it re-arms about 20 seconds after you walk away. A Bluetooth tag’s fixed address also works.') }}</flux:text>
+                    <flux:text class="text-xs">{{ __('Lets the device recognise your phone: alarms stay quiet while you are near and turn back on about 20 seconds after you leave. Broadcast this ID from your phone with an app such as Beacon Simulator.') }}</flux:text>
                 </div>
                 <div class="space-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-700">
-                    <flux:heading size="sm">{{ __('Phone hotspot (backup WiFi)') }}</flux:heading>
+                    <flux:heading size="sm">{{ __('Backup WiFi (optional)') }}</flux:heading>
                     <flux:input wire:model="hotspot_ssid" :label="__('Hotspot name')" placeholder="e.g. Juan's iPhone" autocomplete="off" data-1p-ignore data-lpignore="true" />
                     {{-- new-password: stops the browser filling in the dashboard login, which would then be sent to the device. --}}
                     <flux:input wire:model="hotspot_password" type="password" viewable :label="__('Hotspot password')" autocomplete="new-password" data-1p-ignore data-lpignore="true" />
-                    <flux:text class="text-xs">{{ __('Away from its usual WiFi, or when the server moves to this hotspot, the device switches to it by itself. It receives it on its next check-in, within 30 seconds. iPhone: turn on "Maximize Compatibility" in Personal Hotspot, because the device only uses 2.4 GHz.') }}</flux:text>
+                    <flux:text class="text-xs">{{ __('Used when the usual WiFi is out of reach. iPhone: turn on “Maximize Compatibility” in Personal Hotspot.') }}</flux:text>
                 </div>
                 <flux:button type="submit" size="sm" variant="primary">{{ __('Save details') }}</flux:button>
             </form>
