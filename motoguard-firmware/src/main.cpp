@@ -31,6 +31,28 @@ static unsigned long lastLocationMs = 0;
 static unsigned long lastBatteryCheckMs = 0;
 static unsigned long lastSmsMs = 0;
 static bool smsEverSent = false;
+
+// A theft text that could not go out (modem off the network, or the send failed) is kept and
+// tried again, because on a weak signal the modem drops off and returns within a minute or two.
+#ifndef SMS_RETRY_INTERVAL_MS
+#define SMS_RETRY_INTERVAL_MS 20000    // gap between tries
+#endif
+#ifndef SMS_RETRY_MAX
+#define SMS_RETRY_MAX 4                // real send attempts after the first one
+#endif
+#ifndef SMS_RETRY_WINDOW_MS
+#define SMS_RETRY_WINDOW_MS 300000     // give up after this long; the alert is old news by then
+#endif
+static String pendingSmsNumber;
+static String pendingSmsText;
+static int pendingSmsTries = 0;
+static unsigned long pendingSmsSinceMs = 0;
+static unsigned long pendingSmsNextMs = 0;
+// Server ids of the alerts the pending text stands for (a newer alert replaces the text but its
+// predecessors were never texted either), reported once a retry gets through.
+static const int PENDING_SMS_MAX_ALERTS = 4;
+static long pendingSmsAlertIds[PENDING_SMS_MAX_ALERTS];
+static int pendingSmsAlertCount = 0;
 static bool lowBatteryReported = false;
 static bool powerCutReported = false;
 static float batteryVolts = 0;
@@ -165,12 +187,40 @@ static void checkOwner() {
     }
 }
 
+// Where the motorcycle is, for a text message: the live position, or else the last one the GPS
+// heard and how long ago, so the owner still gets a map link while the GPS has no fix.
+// Kept short: an alert plus this has to fit in one 160-character SMS.
+static String smsLocation() {
+    GpsFix fix = gpsFix();
+    if (fix.valid) {
+        return "Location: https://maps.google.com/?q=" + String(fix.lat, 5) + "," + String(fix.lng, 5);
+    }
+
+    GpsLastKnown last = gpsLastKnown();
+    if (!last.known) {
+        return "GPS location not available yet.";
+    }
+
+    String when;
+    if (last.ageSeconds < 0) {
+        when = "before restart";
+    } else if (last.ageSeconds < 120) {
+        when = "just now";
+    } else if (last.ageSeconds < 7200) {
+        when = String(last.ageSeconds / 60) + " min ago";
+    } else {
+        when = String(last.ageSeconds / 3600) + " h ago";
+    }
+    return "Last seen " + when + ": https://maps.google.com/?q=" + String(last.lat, 5) + "," + String(last.lng, 5);
+}
+
 // Only a theft attempt (or a non-motion alert such as a power cut) texts the owner; minor and
 // suspicious episodes are for the dashboard, which is how classification cuts false alarms.
 static void raiseAlert(const char* type, ThreatLevel level, const String& reason,
                        const ThreatReport* evidence = nullptr) {
     GpsFix fix = gpsFix();
     bool ownerNotified = false;
+    bool waitingForRetry = false;
     bool textOwner = level == ThreatLevel::None || level == ThreatLevel::TheftAttempt;
 
     if (!textOwner) {
@@ -179,15 +229,29 @@ static void raiseAlert(const char* type, ThreatLevel level, const String& reason
         // The owner was texted moments ago; report it as handled so the server doesn't text again.
         ownerNotified = true;
     } else {
-        String message = "MotoGuard+ ALERT: " + reason + ". ";
-        message += fix.valid
-            ? "https://maps.google.com/?q=" + String(fix.lat, 6) + "," + String(fix.lng, 6)
-            : String("GPS location not available yet.");
+        String message = "MotoGuard+ ALERT: " + reason + ". " + smsLocation();
 
         if (ownerPhone.length() == 0) {
             Serial.println("[sms] No text sent: add the owner's phone number on the dashboard (device page, Details)");
+        } else if (pendingSmsText.length() > 0) {
+            // A text is already waiting to be retried: carry the newest position instead of
+            // blocking the alarm with another send that would fail the same way.
+            pendingSmsNumber = ownerPhone;
+            pendingSmsText = message;
+            waitingForRetry = true;
         } else {
             ownerNotified = netSendSms(ownerPhone.c_str(), message);
+            if (!ownerNotified) {
+                pendingSmsNumber = ownerPhone;
+                pendingSmsText = message;
+                pendingSmsTries = 0;
+                pendingSmsSinceMs = millis();
+                pendingSmsNextMs = millis() + SMS_RETRY_INTERVAL_MS;
+                pendingSmsAlertCount = 0;
+                waitingForRetry = true;
+                Serial.printf("[sms] Kept for retry: up to %d more tries over %d s\n", SMS_RETRY_MAX,
+                              SMS_RETRY_WINDOW_MS / 1000);
+            }
         }
         if (ownerNotified) {
             smsEverSent = true;
@@ -217,7 +281,11 @@ static void raiseAlert(const char* type, ThreatLevel level, const String& reason
     // Delivered now if the server can be reached; otherwise kept and delivered when it can.
     // A 422 means the server will never accept it, so there is no point keeping that one.
     bool online = netNetworkName().length() > 0 && settingsServer().token.length() > 0;
-    int status = online ? apiSendAlert(record, false) : 0;
+    long alertId = 0;
+    int status = online ? apiSendAlert(record, false, &alertId) : 0;
+    if (waitingForRetry && alertId > 0 && pendingSmsAlertCount < PENDING_SMS_MAX_ALERTS) {
+        pendingSmsAlertIds[pendingSmsAlertCount++] = alertId;
+    }
     if (!(status >= 200 && status < 300) && status != 422) {
         outboxAddAlert(record);
         Serial.printf("[outbox] No connection: alert kept for later (%d waiting)\n", outboxAlertCount());
@@ -235,7 +303,7 @@ static void reportThreat(const ThreatReport& report) {
     char reason[96];
     switch (report.level) {
         case ThreatLevel::TheftAttempt:
-            snprintf(reason, sizeof(reason), "Possible theft attempt - your motorcycle is being %s", what);
+            snprintf(reason, sizeof(reason), "Possible theft - your motorcycle is being %s", what);
             break;
         case ThreatLevel::Suspicious:
             snprintf(reason, sizeof(reason), "Suspicious activity - your motorcycle was %s", what);
@@ -423,6 +491,38 @@ static void serviceEnrollment(unsigned long now) {
  * Delivers what was recorded while offline, oldest first and a little per pass, so a long
  * backlog never holds up the pings or the alarm.
  */
+static void servicePendingSms(unsigned long now) {
+    if (pendingSmsText.length() == 0 || (long) (now - pendingSmsNextMs) < 0) {
+        return;
+    }
+    pendingSmsNextMs = now + SMS_RETRY_INTERVAL_MS;
+
+    if (now - pendingSmsSinceMs > SMS_RETRY_WINDOW_MS) {
+        Serial.println("[sms] Retry given up: the text could not be sent in time");
+        pendingSmsText = "";
+        return;
+    }
+    if (!smsReady()) {
+        return;   // off the network: waiting costs no attempt, smsUpdate() keeps checking
+    }
+
+    pendingSmsTries++;
+    Serial.printf("[sms] Retry %d of %d\n", pendingSmsTries, SMS_RETRY_MAX);
+    if (netSendSms(pendingSmsNumber.c_str(), pendingSmsText)) {
+        smsEverSent = true;
+        lastSmsMs = millis();
+        pendingSmsText = "";
+        // The dashboard recorded these alerts as not texted; tell it the retry got through.
+        for (int i = 0; i < pendingSmsAlertCount; i++) {
+            apiReportSmsSent(pendingSmsAlertIds[i]);
+        }
+        pendingSmsAlertCount = 0;
+    } else if (pendingSmsTries >= SMS_RETRY_MAX) {
+        Serial.println("[sms] Retry given up: the network refused every attempt");
+        pendingSmsText = "";
+    }
+}
+
 static void serviceOutbox(unsigned long now) {
     static unsigned long lastTryMs = 0;
     if (outboxAlertCount() == 0 && outboxLocationCount() == 0) {
@@ -458,13 +558,17 @@ static void serviceOutbox(unsigned long now) {
  *   offline 60   act as if there were no connection for 60 seconds
  *   online       end that early
  *   status       what is waiting in the outbox, and free memory
+ *   simcheck     SIM, network, signal, SMS centre and the SIM800L's supply voltage
+ *   smstest      text the owner's number now, without an alarm
+ *   gpsdiag      probe the GPS wires: is GPIO26 driven, which baud gives data, are TX/RX swapped
+ *   at <cmd>     send one AT command to the SIM800L and print its reply (e.g. "at AT+CSQ")
  */
 static void serviceSerialCommands() {
     static String line;
     while (Serial.available()) {
         char c = (char) Serial.read();
         if (c != '\n' && c != '\r') {
-            if (line.length() < 40) {
+            if (line.length() < 100) {
                 line += c;
             }
             continue;
@@ -480,6 +584,25 @@ static void serviceSerialCommands() {
         } else if (line == "status") {
             Serial.printf("[test] outbox: %d alert(s), %d GPS point(s); %s; free memory %u B\n", outboxAlertCount(),
                           outboxLocationCount(), netSimulatingOffline() ? "acting offline" : "normal", ESP.getFreeHeap());
+        } else if (line == "simcheck") {
+            smsDiagnose();
+            Serial.println("[simcheck] done");
+        } else if (line == "gpsdiag") {
+            // The probe borrows the GPS UART, so the normal reader is reattached afterwards.
+            gpsDiagnose();
+            gpsReattach();
+        } else if (line == "smstest") {
+            if (ownerPhone.length() == 0) {
+                Serial.println("[test] No owner number yet: add it on the dashboard (device page, Details)");
+            } else {
+                Serial.println("[test] Sending a test text to the owner");
+                smsSend(ownerPhone, "MotoGuard+ test: the SIM800L can text you. " + smsLocation());
+            }
+            Serial.println("[test] smstest done");
+        } else if (line.startsWith("at ")) {
+            String reply = smsCommand(line.substring(3), 10000);
+            reply.replace("\r\n", " | ");
+            Serial.printf("[at] %s -> %s\n", line.substring(3).c_str(), reply.c_str());
         }
         line = "";
     }
@@ -491,6 +614,7 @@ void loop() {
     serviceCalibration(now);
     serviceEnrollment(now);
     smsUpdate(now);
+    servicePendingSms(now);
 
     // How much memory is left. "lowest ever" is the one to watch: it shows how close the
     // board has come to running out since it started.

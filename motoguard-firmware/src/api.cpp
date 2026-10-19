@@ -215,7 +215,7 @@ int apiSendLocations(const LocationRecord* points, int count) {
     return postJson("/api/v1/device/locations", body, nullptr);
 }
 
-int apiSendAlert(const AlertRecord& alert, bool late) {
+int apiSendAlert(const AlertRecord& alert, bool late, long* alertId) {
     JsonDocument body;
     JsonObject root = body.to<JsonObject>();
     root["type"] = alert.type;
@@ -248,7 +248,22 @@ int apiSendAlert(const AlertRecord& alert, bool late) {
         root["recorded_offline"] = true;
     }
 
-    return postJson("/api/v1/device/alerts", body, nullptr);
+    if (alertId == nullptr) {
+        return postJson("/api/v1/device/alerts", body, nullptr);
+    }
+
+    JsonDocument response;
+    int status = postJson("/api/v1/device/alerts", body, &response);
+    *alertId = isSuccess(status) ? response["id"] | 0L : 0L;
+    return status;
+}
+
+bool apiReportSmsSent(long alertId) {
+    JsonDocument body;
+    body.to<JsonObject>();
+    char path[64];
+    snprintf(path, sizeof(path), "/api/v1/device/alerts/%ld/sms-sent", alertId);
+    return isSuccess(postJson(path, body, nullptr));
 }
 
 // Proof that this is genuine firmware: HMAC-SHA256 of the board's ID with the secret the server

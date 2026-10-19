@@ -29,8 +29,11 @@ bool apiSendLocation(const GpsFix& fix);
 // Points recorded while offline, oldest first. Returns the HTTP status (zero or less: not reached).
 int apiSendLocations(const LocationRecord* points, int count);
 // late: the alert happened earlier and is being delivered now, so its time travels with it.
-// Returns the HTTP status (zero or less: the server was not reached).
-int apiSendAlert(const AlertRecord& alert, bool late);
+// Returns the HTTP status (zero or less: the server was not reached). alertId, when given, receives
+// the server's id for the new alert (0 if it did not answer with one).
+int apiSendAlert(const AlertRecord& alert, bool late, long* alertId = nullptr);
+// A retried text for this alert got through after the alert itself was reported.
+bool apiReportSmsSent(long alertId);
 bool apiSendCalibration(const CalibrationResult& result);
 
 enum class EnrollResult {

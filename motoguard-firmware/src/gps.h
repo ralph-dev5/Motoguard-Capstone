@@ -39,10 +39,25 @@ struct GpsHealth {
     bool hasFix;
 };
 
-// TEMPORARY: boot-time wiring/baud probe for the GPS UART. Remove once the module is talking.
+// Wiring/baud probe for the GPS UART, run on demand with the "gpsdiag" serial command. It takes
+// over the GPS UART, so call gpsReattach() afterwards.
 void gpsDiagnose();
+void gpsReattach();
 
 void gpsBegin();
 void gpsUpdate();
 GpsFix gpsFix();
+
+// The last position the receiver reported, kept in flash so an alert can still point somewhere
+// when the GPS has no fix at that moment (indoors, unplugged, or just after a restart).
+struct GpsLastKnown {
+    bool known;
+    double lat;
+    double lng;
+    // Seconds since that position was heard, or -1 when it was saved before the last restart
+    // (the board has no clock that survives a reboot, so the age is then unknown).
+    long ageSeconds;
+};
+
+GpsLastKnown gpsLastKnown();
 GpsHealth gpsHealth();

@@ -52,6 +52,7 @@ static void refresh(bool verbose) {
     if (!wasAnswering) {
         ask("ATE0");        // no echo, so replies are easy to read
         ask("AT+CMGF=1");   // text mode
+        ask("AT+CMEE=2");   // errors in words, so a failed text says why
     }
 
     simReady = ask("AT+CPIN?").indexOf("READY") >= 0;
@@ -96,8 +97,47 @@ void smsUpdate(unsigned long now) {
     refresh(false);
 }
 
+// The modem's own words for a failure ("+CMS ERROR: ..."), or the fallback when it said nothing.
+static String failureReason(const String& reply, const char* fallback) {
+    int at = reply.indexOf("ERROR");
+    if (at < 0) {
+        return fallback;
+    }
+    int from = reply.lastIndexOf('\n', at) + 1;
+    int to = reply.indexOf('\r', at);
+    String line = reply.substring(from, to < 0 ? reply.length() : to);
+    line.trim();
+    return line;
+}
+
 bool smsReady() {
     return answering && simReady && registered;
+}
+
+String smsCommand(const String& cmd, unsigned long waitMs) {
+    String out = ask(cmd.c_str(), waitMs);
+    out.trim();
+    return out.length() > 0 ? out : String("(no reply)");
+}
+
+void smsDiagnose() {
+    // CBC is the module's own supply voltage: below about 3.5 V it resets while sending.
+    static const char* const checks[][2] = {
+        {"AT", "Answers"},
+        {"AT+CMEE=2", "Errors in words"},
+        {"AT+CPIN?", "SIM"},
+        {"AT+CCID", "SIM number"},
+        {"AT+COPS?", "Network"},
+        {"AT+CREG?", "Registered (0,1 home / 0,5 roaming)"},
+        {"AT+CSQ", "Signal (first number, 0-31)"},
+        {"AT+CBC", "Supply (last number, mV)"},
+        {"AT+CSCA?", "SMS centre"},
+    };
+    for (const auto& check : checks) {
+        String reply = smsCommand(check[0], 2500);
+        reply.replace("\r\n", " | ");
+        Serial.printf("[simcheck] %-38s %s -> %s\n", check[1], check[0], reply.c_str());
+    }
 }
 
 bool smsSend(const String& number, const String& message) {
@@ -131,7 +171,8 @@ bool smsSend(const String& number, const String& message) {
     }
     if (reply.indexOf('>') < 0) {
         sim.write(27);   // ESC: abandon the message
-        Serial.println("[sms] Not sent: the modem refused the number");
+        Serial.printf("[sms] Not sent: the modem refused the number (%s)\n",
+                      failureReason(reply, "no prompt within 5 s").c_str());
         return false;
     }
 
@@ -148,7 +189,16 @@ bool smsSend(const String& number, const String& message) {
     }
 
     bool sent = reply.indexOf("+CMGS:") >= 0;
-    Serial.printf("[sms] %s to %s\n", sent ? "Sent" : "FAILED", number.c_str());
+    if (sent) {
+        Serial.printf("[sms] Sent to %s\n", number.c_str());
+    } else {
+        Serial.printf("[sms] FAILED to %s (%s)\n", number.c_str(),
+                      failureReason(reply, "no confirmation from the network within 30 s").c_str());
+        String raw = reply;
+        raw.trim();
+        raw.replace("\r\n", " | ");
+        Serial.printf("[sms] Modem said: %s\n", raw.length() > 0 ? raw.c_str() : "(nothing)");
+    }
     return sent;
 }
 
@@ -159,5 +209,7 @@ void smsBegin() {}
 void smsUpdate(unsigned long) {}
 bool smsReady() { return false; }
 bool smsSend(const String&, const String&) { return false; }
+String smsCommand(const String&, unsigned long) { return "(the mobile-data build has no direct modem line)"; }
+void smsDiagnose() {}
 
 #endif

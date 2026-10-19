@@ -1,11 +1,22 @@
 #include "gps.h"
 
+#include <Preferences.h>
 #include <TinyGPS++.h>
 
 #include "config.h"
 
 static TinyGPSPlus gps;
 static HardwareSerial gpsSerial(1);
+
+// Last known position (see gpsLastKnown). Saved at most every GPS_SAVE_INTERVAL_MS to spare flash.
+static const unsigned long GPS_SAVE_INTERVAL_MS = 10UL * 60UL * 1000UL;
+static bool lastKnown = false;
+static bool lastKnownThisBoot = false;
+static double lastLat = 0;
+static double lastLng = 0;
+static unsigned long lastFixMs = 0;
+static unsigned long lastSavedMs = 0;
+static bool savedThisBoot = false;
 
 // Field 3 of GSV is "satellites in view". TinyGPS++ does not parse GSV itself, and without it the
 // only satellite count available comes from GGA, which stays at zero until a fix already exists -
@@ -36,9 +47,8 @@ static int satellitesInViewTotal() {
     return perConstellation > fused ? perConstellation : fused;
 }
 
-// TEMPORARY diagnostic. Answers, in order: is anything driving the RX line at all, does any
-// common baud produce bytes on GPIO26, and is the module actually wired to GPIO27 instead.
-// Remove this and its call in setup() once the GPS is talking.
+// Diagnostic for the "gpsdiag" serial command. Answers, in order: is anything driving the RX line
+// at all, does any common baud produce bytes on GPIO26, and is the module actually wired to GPIO27.
 static unsigned long probePin(int rxPin, unsigned long baud, String& sample) {
     HardwareSerial probe(1);
     probe.setRxBufferSize(2048);
@@ -97,6 +107,11 @@ void gpsDiagnose() {
     Serial.println("[gpsdiag] ---- end ----");
 }
 
+void gpsReattach() {
+    gpsSerial.setRxBufferSize(GPS_RX_BUFFER_BYTES);
+    gpsSerial.begin(GPS_BAUD, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
+}
+
 void gpsBegin() {
     // Must be called before begin(). The buffer has to cover the longest the loop can go without
     // draining, which is a blocking HTTP call, not one pass of the loop - see GPS_RX_BUFFER_BYTES.
@@ -104,6 +119,37 @@ void gpsBegin() {
     // so the receiver looks deaf (0 satellites in view, no fix) while the wiring is perfect.
     gpsSerial.setRxBufferSize(GPS_RX_BUFFER_BYTES);
     gpsSerial.begin(GPS_BAUD, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
+
+    Preferences prefs;
+    prefs.begin("gps", true);
+    if (prefs.isKey("lat")) {
+        lastLat = prefs.getDouble("lat", 0);
+        lastLng = prefs.getDouble("lng", 0);
+        lastKnown = true;
+    }
+    prefs.end();
+}
+
+static void rememberPosition() {
+    if (!gps.location.isValid() || !gps.location.isUpdated() || gps.location.age() >= 10000) {
+        return;
+    }
+
+    lastLat = gps.location.lat();
+    lastLng = gps.location.lng();
+    lastFixMs = millis();
+    lastKnown = true;
+    lastKnownThisBoot = true;
+
+    if (!savedThisBoot || millis() - lastSavedMs >= GPS_SAVE_INTERVAL_MS) {
+        Preferences prefs;
+        prefs.begin("gps", false);
+        prefs.putDouble("lat", lastLat);
+        prefs.putDouble("lng", lastLng);
+        prefs.end();
+        savedThisBoot = true;
+        lastSavedMs = millis();
+    }
 }
 
 void gpsUpdate() {
@@ -115,6 +161,17 @@ void gpsUpdate() {
     while (gpsSerial.available() > 0 && budget-- > 0 && millis() - start < GPS_READ_BUDGET_MS) {
         gps.encode(gpsSerial.read());
     }
+
+    rememberPosition();
+}
+
+GpsLastKnown gpsLastKnown() {
+    GpsLastKnown last = {};
+    last.known = lastKnown;
+    last.lat = lastLat;
+    last.lng = lastLng;
+    last.ageSeconds = lastKnownThisBoot ? (long) ((millis() - lastFixMs) / 1000UL) : -1;
+    return last;
 }
 
 GpsHealth gpsHealth() {

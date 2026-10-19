@@ -12,3 +12,6 @@ void smsUpdate(unsigned long now);
 bool smsReady();
 // Blocks while the network accepts the message (a few seconds, up to about 30).
 bool smsSend(const String& number, const String& message);
+// Bench tests: one raw AT command and its reply, and a readout of SIM, network, signal and supply.
+String smsCommand(const String& cmd, unsigned long waitMs);
+void smsDiagnose();

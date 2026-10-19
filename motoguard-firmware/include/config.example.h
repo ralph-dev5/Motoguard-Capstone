@@ -172,6 +172,10 @@
 // WiFi build: the SIM800L is used for texts only. 9600 is what the module auto-detects reliably.
 #define SMS_MODEM_BAUD 9600
 #define SMS_STATUS_INTERVAL_MS 30000   // how often the modem's SIM/network status is re-read
+// A theft text that fails is retried, since a weak signal drops the modem off the network briefly.
+#define SMS_RETRY_INTERVAL_MS 20000    // gap between tries
+#define SMS_RETRY_MAX 4                // real send attempts after the first one
+#define SMS_RETRY_WINDOW_MS 300000     // give up after this long
 
 // Kept while there is no connection and delivered when it returns.
 #define OUTBOX_MAX_ALERTS 10           // survive a restart (stored in flash)
