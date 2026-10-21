@@ -204,10 +204,6 @@ new #[Title('Motorcycle')] class extends Component {
 
     {{-- The unit's health in one row of tiles instead of a line of badges and text. --}}
     <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6 [&>*]:min-w-0">
-        <div class="moto-card p-3">
-            <flux:text class="text-xs">{{ __('Connection') }}</flux:text>
-            <div class="mt-1.5"><x-device-status :device="$device" wire:key="presence-{{ $device->id }}" /></div>
-        </div>
         <div class="moto-card col-span-2 p-3 md:col-span-1 xl:col-span-2">
             <flux:text class="text-xs">{{ __('Protection') }}</flux:text>
             <div class="mt-1.5 flex flex-wrap gap-1">
@@ -216,6 +212,10 @@ new #[Title('Motorcycle')] class extends Component {
                     <flux:badge color="red" icon="exclamation-triangle">{{ __('Alert') }}</flux:badge>
                 @endif
             </div>
+        </div>
+        <div class="moto-card p-3">
+            <flux:text class="text-xs">{{ __('Connection') }}</flux:text>
+            <div class="mt-1.5"><x-device-status :device="$device" wire:key="presence-{{ $device->id }}" /></div>
         </div>
         <div class="moto-card p-3">
             <flux:text class="text-xs">{{ __('GPS') }}</flux:text>
@@ -322,7 +322,7 @@ new #[Title('Motorcycle')] class extends Component {
                 <div
                     wire:ignore
                     x-show="view === '2d'"
-                    class="h-[460px] w-full"
+                    class="h-[300px] w-full sm:h-[460px]"
                     x-data="motoMap({
                         devices: [@js($device->livePayload())],
                         deviceId: {{ $device->id }},
@@ -337,7 +337,7 @@ new #[Title('Motorcycle')] class extends Component {
                 <div wire:ignore>
                     <template x-if="view === '3d'">
                         <div
-                            class="relative h-[460px] w-full"
+                            class="relative h-[300px] w-full sm:h-[460px]"
                             x-data="motoMap3d({
                                 device: @js($device->livePayload()),
                                 route: @js($route),
@@ -364,7 +364,14 @@ new #[Title('Motorcycle')] class extends Component {
                     <flux:heading class="flex items-center gap-2"><flux:icon name="bell-alert" variant="mini" class="size-5 text-zinc-400" />{{ __('Latest alerts') }}</flux:heading>
                     <flux:link :href="route('alerts.index', ['device' => $device->id])" wire:navigate class="text-sm">{{ __('See all') }}</flux:link>
                 </div>
-                <div class="moto-card relative overflow-x-auto">
+                <ul class="moto-card divide-y divide-zinc-200 overflow-hidden md:hidden dark:divide-zinc-700">
+                    @forelse ($this->alerts as $alert)
+                        <x-alert-card :alert="$alert" wire:key="alert-card-{{ $alert->id }}" />
+                    @empty
+                        <li class="px-4 py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">{{ __('No alerts for this motorcycle.') }}</li>
+                    @endforelse
+                </ul>
+                <div class="moto-card relative hidden overflow-x-auto md:block">
                     <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
                         <thead class="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                             <tr>

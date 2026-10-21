@@ -48,7 +48,7 @@ new #[Title('Dashboard')] class extends Component {
             ['label' => __('Device'), 'value' => $online, 'sign' => $online ? __('Online') : __('Offline'), 'icon' => $online ? 'signal' : 'signal-slash', 'tone' => $online ? 'good' : 'neutral',
                 'hint' => $total > 1 ? __(':online of :total online', ['online' => $online, 'total' => $total]) : ($online ? __('connected and reporting') : __('not connected'))],
             ['label' => __('Protected'), 'value' => $armed, 'icon' => 'lock-closed', 'tone' => $armed ? 'good' : 'neutral', 'hint' => __('armed and watching')],
-            ['label' => __('Alerts to check'), 'value' => $open, 'icon' => 'bell-alert', 'tone' => $open ? 'bad' : 'neutral', 'hint' => $open ? __('tap Review alerts') : __('all caught up')],
+            ['label' => __('Alerts'), 'value' => $open, 'icon' => 'bell-alert', 'tone' => $open ? 'bad' : 'neutral', 'hint' => $open ? __('waiting to be checked') : __('all caught up')],
         ];
     }
 
@@ -181,7 +181,7 @@ new #[Title('Dashboard')] class extends Component {
         </div>
 
 
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div class="grid grid-cols-3 gap-2 sm:gap-3">
             @foreach ($this->stats as $stat)
                 @php
                     $iconTone = [
@@ -191,22 +191,22 @@ new #[Title('Dashboard')] class extends Component {
                         'neutral' => 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400',
                     ][$stat['tone']];
                 @endphp
-                <div class="moto-card p-4">
+                <div class="moto-card min-w-0 p-3 sm:p-4">
                     <div class="flex items-center justify-between gap-2">
-                        <flux:text class="text-sm">{{ $stat['label'] }}</flux:text>
-                        <span class="grid size-8 place-items-center rounded-lg {{ $iconTone }}">
+                        <flux:text class="truncate text-xs sm:text-sm">{{ $stat['label'] }}</flux:text>
+                        <span class="hidden size-8 shrink-0 place-items-center rounded-lg sm:grid {{ $iconTone }}">
                             <flux:icon :name="$stat['icon']" variant="mini" class="size-4" />
                         </span>
                     </div>
                     @isset($stat['sign'])
-                        <div class="mt-1 flex items-center gap-2 text-3xl font-semibold {{ $stat['tone'] === 'good' ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-zinc-400' }}">
-                            <span class="size-3 rounded-full {{ $stat['tone'] === 'good' ? 'bg-green-500' : 'bg-zinc-400 dark:bg-zinc-500' }}"></span>
+                        <div class="mt-1 flex items-center gap-1.5 text-lg font-semibold sm:gap-2 sm:text-3xl {{ $stat['tone'] === 'good' ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-zinc-400' }}">
+                            <span class="size-2.5 shrink-0 rounded-full sm:size-3 {{ $stat['tone'] === 'good' ? 'bg-green-500' : 'bg-zinc-400 dark:bg-zinc-500' }}"></span>
                             {{ $stat['sign'] }}
                         </div>
                     @else
-                        <div class="mt-1 text-3xl font-semibold tabular-nums {{ $stat['tone'] === 'bad' ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white' }}">{{ number_format($stat['value']) }}</div>
+                        <div class="mt-1 text-lg font-semibold tabular-nums sm:text-3xl {{ $stat['tone'] === 'bad' ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white' }}">{{ number_format($stat['value']) }}</div>
                     @endisset
-                    <flux:text class="text-xs">{{ $stat['hint'] }}</flux:text>
+                    <flux:text class="hidden text-xs sm:block">{{ $stat['hint'] }}</flux:text>
                 </div>
             @endforeach
         </div>
@@ -268,7 +268,7 @@ new #[Title('Dashboard')] class extends Component {
         <div class="moto-card overflow-hidden lg:col-span-2">
             <div
                 wire:ignore
-                class="h-[420px] w-full"
+                class="h-[280px] w-full sm:h-[420px]"
                 x-data="motoMap({
                     devices: @js($this->devices->map->livePayload()->values()),
                     userId: {{ $userId }},

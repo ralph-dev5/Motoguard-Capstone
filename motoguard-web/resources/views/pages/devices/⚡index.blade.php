@@ -73,7 +73,43 @@ new #[Title('Devices')] class extends Component {
         </x-slot:actions>
     </x-page-header>
 
-    <div class="moto-card relative overflow-x-auto">
+    {{-- Phones get one card per device; the table pushed status and actions off-screen. --}}
+    <ul class="space-y-3 md:hidden">
+        @forelse ($this->devices as $device)
+            <li wire:key="device-card-{{ $device->id }}" class="moto-card space-y-3 p-4">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <a href="{{ route('devices.show', $device) }}" wire:navigate class="font-mono font-semibold text-zinc-900 hover:underline dark:text-white">{{ $device->serial }}</a>
+                        <flux:text class="text-xs">{{ $device->plate_number ?? __('No plate number yet') }}</flux:text>
+                    </div>
+                    @if ($device->open_alerts_count > 0)
+                        <a href="{{ route('alerts.index', ['device' => $device->id, 'state' => 'open']) }}" wire:navigate class="shrink-0">
+                            <flux:badge size="sm" color="red" icon="exclamation-triangle">{{ number_format($device->open_alerts_count) }}</flux:badge>
+                        </a>
+                    @endif
+                </div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <x-device-status :device="$device" size="sm" wire:key="presence-card-{{ $device->id }}" />
+                    <flux:badge size="sm" :color="$device->armState()->color()" :icon="$device->armState()->icon()">{{ __($device->armState()->label()) }}</flux:badge>
+                </div>
+                <div class="flex gap-2">
+                    <flux:button size="sm" variant="primary" icon:trailing="arrow-right" :href="route('devices.show', $device)" wire:navigate class="flex-1">{{ __('Open') }}</flux:button>
+                    <flux:dropdown position="bottom" align="end">
+                        <flux:button size="sm" icon="ellipsis-horizontal" :aria-label="__('More actions')" />
+                        <flux:menu>
+                            <flux:menu.item icon="trash" variant="danger" wire:click="deleteDevice({{ $device->id }})" wire:confirm="{{ __('Remove this device with all its alerts and GPS history?') }}">
+                                {{ __('Remove device') }}
+                            </flux:menu.item>
+                        </flux:menu>
+                    </flux:dropdown>
+                </div>
+            </li>
+        @empty
+            <li class="moto-card px-4 py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">{{ __('No devices yet.') }}</li>
+        @endforelse
+    </ul>
+
+    <div class="moto-card relative hidden overflow-x-auto md:block">
         <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
             <thead class="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                 <tr>

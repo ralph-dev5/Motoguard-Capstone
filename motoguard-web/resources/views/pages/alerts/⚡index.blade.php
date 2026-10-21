@@ -241,7 +241,16 @@ new #[Title('Alerts')] class extends Component {
     </div>
     </div>
 
-    <div class="moto-card relative overflow-x-auto">
+    {{-- Phones get cards: the table would hide Location, Text message and Acknowledge off-screen. --}}
+    <ul class="moto-card divide-y divide-zinc-200 overflow-hidden md:hidden dark:divide-zinc-700">
+        @forelse ($this->alerts as $alert)
+            <x-alert-card :alert="$alert" :show-device="$this->devices->count() > 1" wire:key="alert-card-{{ $alert->id }}" />
+        @empty
+            <li class="px-4 py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">{{ __('No alerts match these filters.') }}</li>
+        @endforelse
+    </ul>
+
+    <div class="moto-card relative hidden overflow-x-auto md:block">
         <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
             <thead class="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                 <tr>
