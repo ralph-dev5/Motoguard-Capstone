@@ -30,6 +30,13 @@ new #[Title('Devices')] class extends Component {
      */
     public function addDevice(): void
     {
+        // One device per account (also enforced by a unique index on devices.user_id).
+        if (Auth::user()->devices()->exists()) {
+            $this->addError('serial', __('Your account already has a device. Remove it first to add a different one.'));
+
+            return;
+        }
+
         // Forgive how an ID gets typed on a phone: lower case, stray spaces, a missing dash.
         $serial = strtoupper(preg_replace('/\s+/', '', $this->serial));
         if (preg_match('/^MG[0-9A-F]{6}$/', $serial)) {
@@ -65,12 +72,14 @@ new #[Title('Devices')] class extends Component {
 }; ?>
 
 <section class="w-full space-y-6">
-    <x-page-header :title="__('Devices')" :description="__('Add each MotoGuard+ unit by the ID shown on its setup page. A device belongs to one account.')" icon="map-pin">
-        <x-slot:actions>
-            <flux:modal.trigger name="register-device">
-                <flux:button variant="primary" icon="plus">{{ __('Add device') }}</flux:button>
-            </flux:modal.trigger>
-        </x-slot:actions>
+    <x-page-header :title="__('Devices')" :description="$this->devices->isEmpty() ? __('Add your MotoGuard+ unit by the ID shown on its setup page. Each account has one device.') : __('Each account has one device. To use a different unit, remove this one first.')" icon="map-pin">
+        @if ($this->devices->isEmpty())
+            <x-slot:actions>
+                <flux:modal.trigger name="register-device">
+                    <flux:button variant="primary" icon="plus">{{ __('Add device') }}</flux:button>
+                </flux:modal.trigger>
+            </x-slot:actions>
+        @endif
     </x-page-header>
 
     {{-- Phones get one card per device; the table pushed status and actions off-screen. --}}
