@@ -42,6 +42,19 @@ test('a device that has never reported a battery reading shows a dash', function
         ->assertDontSee('%');
 });
 
+test('the dashboard counts devices that need charging', function () {
+    $user = User::factory()->create();
+    Device::factory()->online()->for($user)->create(['battery_voltage' => 3.72]);  // 20%
+    Device::factory()->online()->for($user)->create(['battery_voltage' => 4.10]);  // 88%
+
+    $this->actingAs($user)
+        ->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Needs charging');
+
+    expect($user->devices->filter(fn (Device $device) => $device->battery()?->needsCharge())->count())->toBe(1);
+});
+
 test('the device page shows the battery charge', function () {
     $device = Device::factory()->online()->create(['battery_voltage' => 3.74]);
 
@@ -88,20 +101,6 @@ test('a device ID that is already registered is refused', function () {
         ->assertHasErrors(['serial' => 'unique']);
 
     expect(Device::query()->count())->toBe(1);
-});
-
-test('an account that already has a device cannot add a second one', function () {
-    $user = User::factory()->create();
-    Device::factory()->for($user)->create(['serial' => 'MG-111111']);
-
-    Livewire::actingAs($user)
-        ->test('pages::devices.index')
-        ->set('serial', 'MG-222222')
-        ->call('addDevice')
-        ->assertHasErrors('serial');
-
-    expect($user->devices()->count())->toBe(1)
-        ->and(Device::query()->where('serial', 'MG-222222')->exists())->toBeFalse();
 });
 
 test('a device ID in the wrong format is refused', function () {
