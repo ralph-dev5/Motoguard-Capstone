@@ -167,10 +167,6 @@ HeartbeatResult apiHeartbeat(const char* state, float batteryVolts, const GpsFix
         } else if (response["backup_wifi"].isNull() && response.containsKey("backup_wifi")) {
             result.hasBackupWifi = true;
         }
-        if (response["owner_beacon"].is<const char*>()) {
-            result.hasOwnerBeacon = true;
-            result.ownerBeacon = response["owner_beacon"].as<const char*>();
-        }
         if (response["owner_phone"].is<const char*>()) {
             result.hasOwnerPhone = true;
             result.ownerPhone = response["owner_phone"].as<const char*>();

@@ -185,5 +185,4 @@
 #define OUTBOX_RETRY_MS 2000
 
 // Bluetooth owner detection (src/owner.cpp). The owner's Bluetooth ID is set on the dashboard.
-#define OWNER_ABSENT_MS 20000   // owner counts as gone this long after the last beacon heard
-#define OWNER_MIN_RSSI -90      // ignore beacons weaker than this (dBm); raise toward -70 to need the phone closer
+#define OWNER_ABSENT_MS 20000   // owner counts as gone this long after the paired phone disconnects

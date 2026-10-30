@@ -304,13 +304,13 @@ test('a calibration report must carry every measurement', function () {
         ->assertJsonValidationErrors(['noise_jerk', 'jolt_threshold']);
 });
 
-test('heartbeat records the owner nearby and hands the device its beacon', function () {
-    $device = Device::factory()->create(['owner_beacon' => '5f3c9a2e-1111-4222-8333-944455556666']);
+test('heartbeat records the owner nearby', function () {
+    $device = Device::factory()->create();
     Sanctum::actingAs($device, [Device::TOKEN_ABILITY]);
 
     $this->postJson(route('api.device.heartbeat'), ['state' => 'disarmed', 'owner_nearby' => true])
         ->assertOk()
-        ->assertJsonPath('owner_beacon', '5f3c9a2e-1111-4222-8333-944455556666');
+        ->assertJsonMissingPath('owner_beacon');
 
     $device->refresh();
 

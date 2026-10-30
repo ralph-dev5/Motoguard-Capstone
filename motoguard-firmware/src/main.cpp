@@ -151,15 +151,7 @@ static void applyOwnerPhone(const String& phone) {
     Serial.printf("[sms] Owner number %s\n", phone.length() > 0 ? "updated from the dashboard" : "removed");
 }
 
-static void applyOwnerBeacon(const String& key) {
-    if (prefs.getString("ownerKey", "") == key) {
-        return;
-    }
-    prefs.putString("ownerKey", key);
-    ownerSetKey(key);
-}
-
-// While the owner's phone is in Bluetooth range the device stands down: no motion alarms, and an
+// While the owner's paired phone is connected over Bluetooth the device stands down: no motion alarms, and an
 // alarm already sounding stops. It is not the dashboard's arm switch - that stays as the owner set
 // it - so walking away re-arms on its own.
 static bool ownerWasNearby = false;
@@ -173,7 +165,7 @@ static void checkOwner() {
     lastHeartbeatMs = 0;  // tell the dashboard now rather than at the next 30 s heartbeat
 
     if (nearby) {
-        Serial.printf("[owner] owner nearby (RSSI %d) - alarms held off\n", ownerRssi());
+        Serial.println("[owner] owner's paired phone nearby - alarms held off");
         if (state != State::Disarmed) {
             setState(State::Disarmed);
             buzzerBeep(1);
@@ -384,7 +376,7 @@ void setup() {
     netBegin();
 
     ownerBegin();
-    ownerSetKey(prefs.getString("ownerKey", ""));
+    prefs.remove("ownerKey");   // the beacon ID of the older app-based detection, no longer used
 
     state = armed ? State::Armed : State::Disarmed;
     threatSetArmed(armed);
@@ -562,6 +554,7 @@ static void serviceOutbox(unsigned long now) {
  *   smstest      text the owner's number now, without an alarm
  *   gpsdiag      probe the GPS wires: is GPIO26 driven, which baud gives data, are TX/RX swapped
  *   at <cmd>     send one AT command to the SIM800L and print its reply (e.g. "at AT+CSQ")
+ *   unpair       forget every phone paired over Bluetooth
  */
 static void serviceSerialCommands() {
     static String line;
@@ -599,6 +592,8 @@ static void serviceSerialCommands() {
                 smsSend(ownerPhone, "MotoGuard+ test: the SIM800L can text you. " + smsLocation());
             }
             Serial.println("[test] smstest done");
+        } else if (line == "unpair") {
+            ownerForgetPhones();
         } else if (line.startsWith("at ")) {
             String reply = smsCommand(line.substring(3), 10000);
             reply.replace("\r\n", " | ");
@@ -734,9 +729,6 @@ void loop() {
         if (heartbeat.ok) {
             if (heartbeat.hasBackupWifi) {
                 netSetBackupWifi(heartbeat.backupSsid, heartbeat.backupPass);
-            }
-            if (heartbeat.hasOwnerBeacon) {
-                applyOwnerBeacon(heartbeat.ownerBeacon);
             }
             if (heartbeat.hasOwnerPhone) {
                 applyOwnerPhone(heartbeat.ownerPhone);

@@ -28,7 +28,6 @@ use Laravel\Sanctum\HasApiTokens;
  * @property string|null $plate_number
  * @property string $serial
  * @property string|null $owner_phone
- * @property string|null $owner_beacon
  * @property string|null $hotspot_ssid
  * @property string|null $hotspot_password
  * @property bool $owner_nearby
@@ -52,7 +51,7 @@ use Laravel\Sanctum\HasApiTokens;
  * @property CarbonImmutable|null $updated_at
  */
 #[Hidden(['hotspot_password'])]
-#[Fillable(['name', 'plate_number', 'serial', 'owner_phone', 'owner_beacon', 'hotspot_ssid', 'hotspot_password', 'owner_nearby', 'owner_seen_at', 'is_armed', 'reported_armed', 'calibration_requested_at', 'calibrated_at', 'calibration', 'status', 'battery_voltage', 'gps_chars', 'gps_satellites', 'gps_fix_at', 'last_seen_at', 'last_location', 'safe_zone_center', 'safe_zone_radius_m', 'parked_at'])]
+#[Fillable(['name', 'plate_number', 'serial', 'owner_phone', 'hotspot_ssid', 'hotspot_password', 'owner_nearby', 'owner_seen_at', 'is_armed', 'reported_armed', 'calibration_requested_at', 'calibrated_at', 'calibration', 'status', 'battery_voltage', 'gps_chars', 'gps_satellites', 'gps_fix_at', 'last_seen_at', 'last_location', 'safe_zone_center', 'safe_zone_radius_m', 'parked_at'])]
 class Device extends Model implements AuthenticatableContract
 {
     /** @use HasFactory<DeviceFactory> */

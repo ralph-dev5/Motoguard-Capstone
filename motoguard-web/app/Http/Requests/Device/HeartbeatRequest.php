@@ -23,7 +23,7 @@ class HeartbeatRequest extends FormRequest
             // it is what says "nothing is arriving", so this must not be coerced away.
             'gps_chars' => ['nullable', 'integer', 'min:0'],
             'gps_satellites' => ['nullable', 'integer', 'between:0,64'],
-            // The owner's phone beacon is in Bluetooth range; motion alarms are held off meanwhile.
+            // The owner's paired phone is connected over Bluetooth; motion alarms are held off meanwhile.
             'owner_nearby' => ['nullable', 'boolean'],
         ];
     }

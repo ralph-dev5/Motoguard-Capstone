@@ -58,7 +58,6 @@ class DeviceTelemetry
         return [
             'armed' => $device->is_armed,
             'calibrate' => $device->calibrationPending(),
-            'owner_beacon' => $device->owner_beacon ?? '',
             // The number the device texts by itself through its SIM, kept on the device so it can
             // do so with no connection.
             'owner_phone' => $device->owner_phone ?? '',

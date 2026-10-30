@@ -30,8 +30,6 @@ new #[Title('Motorcycle')] class extends Component {
 
     public string $owner_phone = '';
 
-    public string $owner_beacon = '';
-
     public string $hotspot_ssid = '';
 
     public string $hotspot_password = '';
@@ -45,7 +43,6 @@ new #[Title('Motorcycle')] class extends Component {
         $this->zoneRadius = $device->parkingRadius();
         $this->plate_number = (string) $device->plate_number;
         $this->owner_phone = (string) $device->owner_phone;
-        $this->owner_beacon = (string) $device->owner_beacon;
         $this->hotspot_ssid = (string) $device->hotspot_ssid;
         $this->hotspot_password = (string) $device->hotspot_password;
 
@@ -123,28 +120,20 @@ new #[Title('Motorcycle')] class extends Component {
         $validated = $this->validate([
             'plate_number' => ['nullable', 'string', 'max:20'],
             'owner_phone' => ['nullable', 'string', 'regex:/^\+?[0-9]{10,15}$/'],
-            // An iBeacon UUID broadcast by the owner's phone, or the fixed address of a Bluetooth tag.
-            'owner_beacon' => ['nullable', 'string', 'regex:/^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})$/'],
             // WPA2 limits: 32-byte name, 8-63 character password.
             'hotspot_ssid' => ['nullable', 'string', 'max:32'],
             'hotspot_password' => ['nullable', 'required_with:hotspot_ssid', 'string', 'min:8', 'max:63'],
-        ], ['owner_beacon.regex' => __('Enter a beacon UUID (like 8-4-4-4-12 hex digits) or a Bluetooth address (like AA:BB:CC:DD:EE:FF).')]);
+        ]);
 
         $this->device->update([
             ...$validated,
             'plate_number' => $validated['plate_number'] ?: null,
             'owner_phone' => $validated['owner_phone'] ?: null,
-            'owner_beacon' => $validated['owner_beacon'] ? strtolower($validated['owner_beacon']) : null,
             'hotspot_ssid' => $validated['hotspot_ssid'] ?: null,
             'hotspot_password' => $validated['hotspot_ssid'] ? $validated['hotspot_password'] : null,
         ]);
 
         Flux::toast(text: __('Details saved.'), variant: 'success');
-    }
-
-    public function generateBeacon(): void
-    {
-        $this->owner_beacon = (string) Str::uuid();
     }
 
     public function acknowledge(?int $alertId = null): void
@@ -502,10 +491,14 @@ new #[Title('Motorcycle')] class extends Component {
                 <flux:heading class="flex items-center gap-2"><flux:icon name="identification" variant="mini" class="size-5 text-zinc-400" />{{ __('Details') }}</flux:heading>
                 <flux:input wire:model="plate_number" :label="__('Plate number')" />
                 <flux:input wire:model="owner_phone" :label="__('Phone number for text alerts')" placeholder="09171234567" />
-                <div class="space-y-2">
-                    <flux:input wire:model="owner_beacon" :label="__('Your phone’s Bluetooth ID (optional)')" placeholder="e.g. 5f3c9a2e-…" />
-                    <flux:button type="button" size="xs" icon="sparkles" wire:click="generateBeacon">{{ __('Generate an ID') }}</flux:button>
-                    <flux:text class="text-xs">{{ __('Lets the device recognise your phone: alarms stay quiet while you are near and turn back on about 20 seconds after you leave. Broadcast this ID from your phone with an app such as Beacon Simulator.') }}</flux:text>
+                {{-- No app: the phone pairs once in its own Bluetooth settings and reconnects by itself when near. --}}
+                <div class="space-y-1 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+                    <flux:heading size="sm">{{ __('Pair your phone (optional)') }}</flux:heading>
+                    <flux:text class="text-sm">
+                        {{ __('On your phone open Settings, Bluetooth, tap “MotoGuard :id” and enter PIN', ['id' => $device->serial]) }}
+                        <span class="font-mono font-semibold tracking-wider text-zinc-900 dark:text-white">{{ \App\Support\BluetoothPin::for($device->serial) ?? '—' }}</span>.
+                    </flux:text>
+                    <flux:text class="text-xs">{{ __('Once paired, alarms stay quiet while your phone is near with Bluetooth on and turn back on about 20 seconds after you leave. No app is needed.') }}</flux:text>
                 </div>
                 <div class="space-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-700">
                     <flux:heading size="sm">{{ __('Backup WiFi (optional)') }}</flux:heading>

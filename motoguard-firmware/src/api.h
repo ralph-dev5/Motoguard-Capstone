@@ -9,8 +9,6 @@ struct HeartbeatResult {
     bool ok;
     bool armed;
     bool calibrate;       // the owner asked for a calibration that has not been reported yet
-    bool hasOwnerBeacon;  // the server sent the owner's Bluetooth ID (empty when none is set)
-    String ownerBeacon;
     bool hasBackupWifi;   // the server said which phone hotspot to use (empty name when none)
     String backupSsid;
     String backupPass;

@@ -217,24 +217,16 @@ test('the device page shows the calibrated thresholds', function () {
         ->assertSee('jolt > 1.50');
 });
 
-test('the owner can save a Bluetooth beacon ID', function () {
-    $device = Device::factory()->create();
+test('the device page shows the Bluetooth pairing PIN the unit expects', function () {
+    config(['services.device.enroll_secret' => 'test-secret']);
+    $device = Device::factory()->create(['serial' => 'MG-04A784']);
+
+    // Same derivation as the firmware's ownerPairPin(): HMAC-SHA256 of "pair:" + ID, first 4 bytes.
+    $mac = hash_hmac('sha256', 'pair:MG-04A784', 'test-secret');
+    $pin = str_pad((string) (hexdec(substr($mac, 0, 8)) % 1_000_000), 6, '0', STR_PAD_LEFT);
 
     Livewire::actingAs($device->user)
         ->test('pages::devices.show', ['device' => $device])
-        ->set('owner_beacon', '5F3C9A2E-1111-4222-8333-944455556666')
-        ->call('saveDetails')
-        ->assertHasNoErrors();
-
-    expect($device->refresh()->owner_beacon)->toBe('5f3c9a2e-1111-4222-8333-944455556666');
-});
-
-test('a malformed Bluetooth beacon ID is rejected', function () {
-    $device = Device::factory()->create();
-
-    Livewire::actingAs($device->user)
-        ->test('pages::devices.show', ['device' => $device])
-        ->set('owner_beacon', 'my phone')
-        ->call('saveDetails')
-        ->assertHasErrors(['owner_beacon' => 'regex']);
+        ->assertSee('MotoGuard MG-04A784')
+        ->assertSee($pin);
 });
