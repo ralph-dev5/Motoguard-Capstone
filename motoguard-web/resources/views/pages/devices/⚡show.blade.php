@@ -272,6 +272,45 @@ new #[Title('Motorcycle')] class extends Component {
         </div>
     @endunless
 
+    {{--
+        Next step once the unit is online: pair the owner's phone so the alarms stay quiet while they
+        are near. Shown until the unit first reports the owner nearby (owner_seen_at), i.e. a phone has
+        paired and connected; the same PIN stays under Settings > Details for a second phone.
+    --}}
+    @if ($device->isRecentlySeen() && ! $device->owner_seen_at)
+        <div class="rounded-xl border border-blue-500/40 bg-blue-500/5 p-5">
+            <div class="flex items-start gap-3">
+                <span class="grid size-10 shrink-0 place-items-center rounded-lg bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                    <flux:icon name="device-phone-mobile" />
+                </span>
+                <div class="min-w-0">
+                    <flux:heading size="lg">{{ __('Pair your phone') }}</flux:heading>
+                    <flux:text class="text-sm">{{ __('So the alarms stay quiet while you are with your motorcycle. No app needed, only once.') }}</flux:text>
+                </div>
+            </div>
+
+            <ol class="mt-5 grid gap-4 md:grid-cols-3">
+                <li class="rounded-lg border border-zinc-200 bg-white/60 p-4 dark:border-zinc-700 dark:bg-zinc-900/40">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">{{ __('Step 1') }}</div>
+                    <div class="mt-1 font-medium text-zinc-900 dark:text-white">{{ __('Open Bluetooth settings') }}</div>
+                    <flux:text class="mt-1 text-sm">{{ __('On your phone go to Settings, Bluetooth, and turn it on. Stay near the motorcycle.') }}</flux:text>
+                </li>
+                <li class="rounded-lg border border-zinc-200 bg-white/60 p-4 dark:border-zinc-700 dark:bg-zinc-900/40">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">{{ __('Step 2') }}</div>
+                    <div class="mt-1 font-medium text-zinc-900 dark:text-white">{{ __('Tap the device') }}</div>
+                    <div class="mt-2 font-mono text-zinc-900 dark:text-white">MotoGuard {{ $device->serial }}</div>
+                    <flux:text class="mt-1 text-sm">{{ __('It is listed under Other Devices or Available devices.') }}</flux:text>
+                </li>
+                <li class="rounded-lg border border-zinc-200 bg-white/60 p-4 dark:border-zinc-700 dark:bg-zinc-900/40">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">{{ __('Step 3') }}</div>
+                    <div class="mt-1 font-medium text-zinc-900 dark:text-white">{{ __('Enter this PIN') }}</div>
+                    <div class="mt-2 font-mono text-2xl font-semibold tracking-widest text-zinc-900 dark:text-white">{{ \App\Support\BluetoothPin::for($device->serial) ?? '—' }}</div>
+                </li>
+            </ol>
+            <flux:text class="mt-3 text-xs">{{ __('The device beeps once when it sees your phone. After that your phone reconnects by itself whenever you are near; keep this PIN private.') }}</flux:text>
+        </div>
+    @endif
+
     {{-- Two tabs keep the live view apart from the settings, which are rarely touched. --}}
     <div x-data="{ tab: 'overview' }" class="space-y-5">
         <div class="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">

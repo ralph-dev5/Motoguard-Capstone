@@ -230,3 +230,18 @@ test('the device page shows the Bluetooth pairing PIN the unit expects', functio
         ->assertSee('MotoGuard MG-04A784')
         ->assertSee($pin);
 });
+
+test('an online device asks the owner to pair a phone until one has been seen nearby', function () {
+    $device = Device::factory()->create(['last_seen_at' => now(), 'owner_seen_at' => null]);
+
+    Livewire::actingAs($device->user)
+        ->test('pages::devices.show', ['device' => $device])
+        ->assertSee('Pair your phone')
+        ->assertSee('Enter this PIN');
+
+    $device->update(['owner_seen_at' => now()]);
+
+    Livewire::actingAs($device->user)
+        ->test('pages::devices.show', ['device' => $device])
+        ->assertDontSee('Enter this PIN');
+});
