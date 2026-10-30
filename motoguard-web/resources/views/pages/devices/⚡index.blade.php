@@ -1,7 +1,7 @@
 <?php
 
+use App\Livewire\Actions\Logout;
 use App\Models\Device;
-use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -9,8 +9,6 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 
 new #[Title('Devices')] class extends Component {
-    public string $serial = '';
-
     /**
      * @return Collection<int, Device>
      */
@@ -24,63 +22,25 @@ new #[Title('Devices')] class extends Component {
     }
 
     /**
-     * Adds a device by the ID built into the board. That one value is all the owner types: the
-     * board proves who it is and collects its own token (see EnrollController), and the
-     * motorcycle's plate and SMS number are filled in later on the device page.
+     * Removes the unit with its history and disconnects this browser. The hidden owner record goes
+     * too, so connecting again with the ID and PIN starts from a clean device.
      */
-    public function addDevice(): void
+    public function deleteDevice(int $deviceId, Logout $logout): void
     {
-        // One device per account (also enforced by a unique index on devices.user_id).
-        if (Auth::user()->devices()->exists()) {
-            $this->addError('serial', __('Your account already has a device. Remove it first to add a different one.'));
-
-            return;
-        }
-
-        // Forgive how an ID gets typed on a phone: lower case, stray spaces, a missing dash.
-        $serial = strtoupper(preg_replace('/\s+/', '', $this->serial));
-        if (preg_match('/^MG[0-9A-F]{6}$/', $serial)) {
-            $serial = 'MG-'.substr($serial, 2);
-        }
-        $this->serial = $serial;
-
-        $this->validate(
-            ['serial' => ['required', 'string', 'regex:'.Device::SERIAL_PATTERN, 'unique:devices,serial']],
-            [
-                'serial.regex' => __('A device ID looks like MG-04A784: MG, a dash, then six letters or digits (0-9, A-F).'),
-                'serial.unique' => __('This device is already registered.'),
-            ],
-        );
-
-        $device = Auth::user()->devices()->create([
-            'serial' => $serial,
-            // A device has no separate name: it is known by its ID everywhere.
-            'name' => $serial,
-        ]);
-
-        $this->redirectRoute('devices.show', $device, navigate: true);
-    }
-
-    public function deleteDevice(int $deviceId): void
-    {
-        $device = Auth::user()->devices()->findOrFail($deviceId);
+        $owner = Auth::user();
+        $device = $owner->devices()->findOrFail($deviceId);
         $device->tokens()->delete();
         $device->delete();
 
-        Flux::toast(text: __('Device removed.'), variant: 'success');
+        $logout();
+        $owner->delete();
+
+        $this->redirect('/', navigate: true);
     }
 }; ?>
 
 <section class="w-full space-y-6">
-    <x-page-header :title="__('Devices')" :description="$this->devices->isEmpty() ? __('Add your MotoGuard+ unit by the ID shown on its setup page. Each account has one device.') : __('Each account has one device. To use a different unit, remove this one first.')" icon="map-pin">
-        @if ($this->devices->isEmpty())
-            <x-slot:actions>
-                <flux:modal.trigger name="register-device">
-                    <flux:button variant="primary" icon="plus">{{ __('Add device') }}</flux:button>
-                </flux:modal.trigger>
-            </x-slot:actions>
-        @endif
-    </x-page-header>
+    <x-page-header :title="__('Devices')" :description="__('The MotoGuard+ unit this phone is connected to.')" icon="map-pin" />
 
     {{-- Phones get one card per device; the table pushed status and actions off-screen. --}}
     <ul class="space-y-3 md:hidden">
@@ -106,7 +66,7 @@ new #[Title('Devices')] class extends Component {
                     <flux:dropdown position="bottom" align="end">
                         <flux:button size="sm" icon="ellipsis-horizontal" :aria-label="__('More actions')" />
                         <flux:menu>
-                            <flux:menu.item icon="trash" variant="danger" wire:click="deleteDevice({{ $device->id }})" wire:confirm="{{ __('Remove this device with all its alerts and GPS history?') }}">
+                            <flux:menu.item icon="trash" variant="danger" wire:click="deleteDevice({{ $device->id }})" wire:confirm="{{ __('Remove this device with all its alerts and GPS history? This phone will be disconnected.') }}">
                                 {{ __('Remove device') }}
                             </flux:menu.item>
                         </flux:menu>
@@ -163,7 +123,7 @@ new #[Title('Devices')] class extends Component {
                                 <flux:dropdown position="bottom" align="end">
                                     <flux:button size="sm" icon="ellipsis-horizontal" :aria-label="__('More actions')" />
                                     <flux:menu>
-                                        <flux:menu.item icon="trash" variant="danger" wire:click="deleteDevice({{ $device->id }})" wire:confirm="{{ __('Remove this device with all its alerts and GPS history?') }}">
+                                        <flux:menu.item icon="trash" variant="danger" wire:click="deleteDevice({{ $device->id }})" wire:confirm="{{ __('Remove this device with all its alerts and GPS history? This phone will be disconnected.') }}">
                                             {{ __('Remove device') }}
                                         </flux:menu.item>
                                     </flux:menu>
@@ -180,23 +140,4 @@ new #[Title('Devices')] class extends Component {
         </table>
     </div>
 
-    <flux:modal name="register-device" class="md:w-96">
-        <form wire:submit="addDevice" class="space-y-6">
-            <div>
-                <flux:heading size="lg">{{ __('Add device') }}</flux:heading>
-                <flux:text class="mt-2">{{ __('Type the ID of your MotoGuard+ unit. It is shown on the device’s setup page (WiFi “MotoGuard-Setup”).') }}</flux:text>
-            </div>
-
-            <flux:input wire:model="serial" :label="__('Device ID')" placeholder="MG-04A784" autocomplete="off" autocapitalize="characters" required />
-
-            <flux:text class="text-sm">{{ __('You can add the plate number and a phone number for SMS afterwards.') }}</flux:text>
-
-            <div class="flex justify-end gap-2">
-                <flux:modal.close>
-                    <flux:button>{{ __('Cancel') }}</flux:button>
-                </flux:modal.close>
-                <flux:button type="submit" variant="primary">{{ __('Add device') }}</flux:button>
-            </div>
-        </form>
-    </flux:modal>
 </section>

@@ -161,14 +161,8 @@ return [
     */
 
     'features' => [
-        Features::registration(),
-        Features::resetPasswords(),
-        Features::emailVerification(),
-        Features::twoFactorAuthentication([
-            'confirm' => true,
-            'confirmPassword' => true,
-            // 'window' => 0
-        ]),
+        // No accounts or passwords: a browser connects to a unit with its Device ID and PIN
+        // (App\Http\Controllers\Auth\ConnectController), so none of Fortify's account features apply.
     ],
 
 ];

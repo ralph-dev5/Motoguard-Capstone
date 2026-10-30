@@ -378,6 +378,7 @@ void setup() {
     motionReady = motionBegin();
 
     settingsBegin();
+    Serial.printf("[device] PIN %s (type it on the website with the ID to connect)\n", apiConnectPin().c_str());
     outboxBegin();
     ownerPhone = prefs.getString("ownerPhone", "");
     smsBegin();
@@ -470,8 +471,8 @@ static void serviceEnrollment(unsigned long now) {
             break;
         case EnrollResult::NotAdded:
             if (!waitingSaid) {
-                Serial.printf("[enroll] %s is not on any account yet. On the dashboard: Devices > Add device, and type this ID.\n",
-                              settingsDeviceId().c_str());
+                Serial.printf("[enroll] Nobody has connected to %s yet. On the website, type this ID and PIN %s.\n",
+                              settingsDeviceId().c_str(), apiConnectPin().c_str());
                 waitingSaid = true;
             }
             pingFailures = 0;   // the server answered, so it is reachable
