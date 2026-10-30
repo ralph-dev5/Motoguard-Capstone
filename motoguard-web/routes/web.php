@@ -1,12 +1,8 @@
 <?php
 
-use App\Http\Controllers\Auth\ConnectController;
 use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/dashboard')->name('home');
-
-// No accounts: a browser connects to a unit with its Device ID and PIN (the /login page).
-Route::post('connect', ConnectController::class)->middleware(['guest', 'throttle:20,1'])->name('connect');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('dashboard', 'pages::dashboard')->name('dashboard');

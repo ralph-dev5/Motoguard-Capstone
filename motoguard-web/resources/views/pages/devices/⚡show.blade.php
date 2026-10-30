@@ -188,8 +188,7 @@ new #[Title('Motorcycle')] class extends Component {
 }; ?>
 
 <section class="w-full space-y-6" wire:poll.60s>
-    {{-- The PIN is what lets another phone connect, so the owner can read it here as well as on the unit. --}}
-    <x-page-header :title="$device->serial" :description="($device->plate_number ? __('Plate :plate', ['plate' => $device->plate_number]) : __('No plate number yet')).' · '.__('PIN :pin', ['pin' => \App\Support\DevicePin::for($device->serial) ?? '—'])" icon="shield-check">
+    <x-page-header :title="$device->serial" :description="$device->plate_number ? __('Plate :plate', ['plate' => $device->plate_number]) : __('No plate number yet')" icon="shield-check">
         <x-slot:before>
             <flux:link :href="route('devices.index')" wire:navigate class="text-sm">&larr; {{ __('Devices') }}</flux:link>
         </x-slot:before>

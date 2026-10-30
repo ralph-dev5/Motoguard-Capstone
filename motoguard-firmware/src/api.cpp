@@ -282,21 +282,6 @@ static String enrollProof(const String& id) {
     return String(hex);
 }
 
-String apiConnectPin() {
-    const String msg = "pin:" + settingsDeviceId();
-    const char* key = DEVICE_ENROLL_SECRET;
-    unsigned char mac[32];
-    mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
-                    reinterpret_cast<const unsigned char*>(key), strlen(key),
-                    reinterpret_cast<const unsigned char*>(msg.c_str()), msg.length(), mac);
-
-    // First four bytes as a big-endian number, last six digits: the same as the server.
-    uint32_t n = (uint32_t(mac[0]) << 24) | (uint32_t(mac[1]) << 16) | (uint32_t(mac[2]) << 8) | mac[3];
-    char pin[7];
-    snprintf(pin, sizeof(pin), "%06lu", static_cast<unsigned long>(n % 1000000UL));
-    return String(pin);
-}
-
 EnrollResult apiEnroll() {
     if (!netEnsureConnected()) {
         return EnrollResult::Unreachable;

@@ -44,7 +44,3 @@ enum class EnrollResult {
 };
 // Asks the server for this board's token using the ID built into its chip.
 EnrollResult apiEnroll();
-
-// The 6-digit PIN the owner types on the website, next to the Device ID, to connect to this unit.
-// Derived from the ID and DEVICE_ENROLL_SECRET exactly as the server does (App\Support\DevicePin).
-String apiConnectPin();

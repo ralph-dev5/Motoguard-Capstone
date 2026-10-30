@@ -11,7 +11,6 @@
 #include <WiFiUdp.h>
 #include <esp_wifi.h>
 
-#include "api.h"
 #include "settings.h"
 #include "sms.h"
 
@@ -165,10 +164,9 @@ void netBegin() {
     // Left empty on purpose: the device finds the server by itself (see netDiscoverPoll).
     WiFiManagerParameter hostParam("api_host", "Server IP (leave empty: found automatically)", "", 64);
     WiFiManagerParameter portParam("api_port", "Server port", port.c_str(), 6);
-    // Read-only: the ID and PIN the owner types on the website to connect to this device.
+    // Read-only: the ID the owner types on the dashboard to add this device.
     String idHtml = "<p style='margin:14px 0 4px'>Device ID</p><p style='font:700 22px monospace;letter-spacing:2px;margin:0 0 6px'>"
-        + settingsDeviceId() + "</p><p style='margin:10px 0 4px'>PIN</p><p style='font:700 22px monospace;letter-spacing:2px;margin:0 0 6px'>"
-        + apiConnectPin() + "</p><p style='margin:0 0 14px'>Open the MotoGuard+ website and type this ID and PIN to connect.</p>";
+        + settingsDeviceId() + "</p><p style='margin:0 0 14px'>Type this ID on the dashboard: Devices, then Add device.</p>";
     WiFiManagerParameter idParam(idHtml.c_str());
     wm.addParameter(&idParam);
     wm.addParameter(&hostParam);

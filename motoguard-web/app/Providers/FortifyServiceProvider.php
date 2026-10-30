@@ -38,9 +38,6 @@ class FortifyServiceProvider extends ServiceProvider
     {
         Fortify::resetUserPasswordsUsing(ResetUserPassword::class);
         Fortify::createUsersUsing(CreateNewUser::class);
-
-        // Password sign-in is closed: a browser connects with a Device ID and PIN instead.
-        Fortify::authenticateUsing(fn () => null);
     }
 
     /**
