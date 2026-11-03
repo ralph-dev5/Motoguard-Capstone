@@ -69,12 +69,12 @@ class Alert extends Model
     public function smsMessage(): string
     {
         $where = $this->location
-            ? 'Location (paste in Google Maps): '.$this->location->coordinates()
+            ? "Location (paste in Google Maps):\n".$this->location->coordinates()
             : 'GPS location not available yet.';
 
         $what = $this->level ? "{$this->level->label()} - {$this->type->label()}" : $this->type->label();
 
-        return "MotoGuard+ ALERT: {$what} on {$this->device->label()}. {$where}";
+        return "MotoGuard+ ALERT: {$what} on {$this->device->label()}.\n{$where}";
     }
 
     /**

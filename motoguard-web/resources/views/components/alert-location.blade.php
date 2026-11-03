@@ -24,7 +24,7 @@
 
 @if ($alert->location)
     {{-- The owner's SMS carries bare coordinates (links get blocked by the networks), so the clickable map lives here. --}}
-    <flux:button size="xs" icon="map-pin" :href="$alert->location->mapsUrl()" target="_blank" rel="noopener">{{ __('Open in Google Maps') }}</flux:button>
+    <flux:link :href="$alert->location->mapsUrl()" target="_blank" rel="noopener" class="block max-w-64 whitespace-normal break-all text-sm">{{ $alert->location->mapsUrl() }}</flux:link>
 @else
     <span
         {{ $attributes->merge(['class' => 'inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400']) }}
