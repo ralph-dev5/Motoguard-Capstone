@@ -180,12 +180,14 @@ static void checkOwner() {
 }
 
 // Where the motorcycle is, for a text message: the live position, or else the last one the GPS
-// heard and how long ago, so the owner still gets a map link while the GPS has no fix.
-// Kept short: an alert plus this has to fit in one 160-character SMS.
+// heard and how long ago, so the owner still knows where to look while the GPS has no fix.
+// Plain coordinates, no link: Philippine networks silently drop person-to-person texts that
+// contain a URL. Pasted into Google Maps they open the spot. Kept short: an alert plus this has
+// to fit in one 160-character SMS.
 static String smsLocation() {
     GpsFix fix = gpsFix();
     if (fix.valid) {
-        return "Location: https://maps.google.com/?q=" + String(fix.lat, 5) + "," + String(fix.lng, 5);
+        return "Location (paste in Google Maps): " + String(fix.lat, 5) + "," + String(fix.lng, 5);
     }
 
     GpsLastKnown last = gpsLastKnown();
@@ -203,7 +205,7 @@ static String smsLocation() {
     } else {
         when = String(last.ageSeconds / 3600) + " h ago";
     }
-    return "Last seen " + when + ": https://maps.google.com/?q=" + String(last.lat, 5) + "," + String(last.lng, 5);
+    return "Last seen " + when + " (paste in Google Maps): " + String(last.lat, 5) + "," + String(last.lng, 5);
 }
 
 // Only a theft attempt (or a non-motion alert such as a power cut) texts the owner; minor and
@@ -589,7 +591,7 @@ static void serviceSerialCommands() {
                 Serial.println("[test] No owner number yet: add it on the dashboard (device page, Details)");
             } else {
                 Serial.println("[test] Sending a test text to the owner");
-                smsSend(ownerPhone, "MotoGuard+ test: the SIM800L can text you. " + smsLocation());
+                smsSend(ownerPhone, "MotoGuard+ test: the A7670G can text you. " + smsLocation());
             }
             Serial.println("[test] smstest done");
         } else if (line == "unpair") {
