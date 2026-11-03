@@ -187,7 +187,7 @@ static void checkOwner() {
 static String smsLocation() {
     GpsFix fix = gpsFix();
     if (fix.valid) {
-        return "Location (paste in Google Maps): " + String(fix.lat, 5) + "," + String(fix.lng, 5);
+        return "Location (paste in Google Maps):\n" + String(fix.lat, 5) + "," + String(fix.lng, 5);
     }
 
     GpsLastKnown last = gpsLastKnown();
@@ -205,7 +205,7 @@ static String smsLocation() {
     } else {
         when = String(last.ageSeconds / 3600) + " h ago";
     }
-    return "Last seen " + when + " (paste in Google Maps): " + String(last.lat, 5) + "," + String(last.lng, 5);
+    return "Last seen " + when + " (paste in Google Maps):\n" + String(last.lat, 5) + "," + String(last.lng, 5);
 }
 
 // Only a theft attempt (or a non-motion alert such as a power cut) texts the owner; minor and
@@ -223,7 +223,8 @@ static void raiseAlert(const char* type, ThreatLevel level, const String& reason
         // The owner was texted moments ago; report it as handled so the server doesn't text again.
         ownerNotified = true;
     } else {
-        String message = "MotoGuard+ ALERT: " + reason + ". " + smsLocation();
+        // The coordinates sit on their own line so they stand out and are easy to long-press and copy.
+        String message = "MotoGuard+ ALERT: " + reason + ".\n" + smsLocation();
 
         if (ownerPhone.length() == 0) {
             Serial.println("[sms] No text sent: add the owner's phone number on the dashboard (device page, Details)");
@@ -592,7 +593,7 @@ static void serviceSerialCommands() {
                 Serial.println("[test] No owner number yet: add it on the dashboard (device page, Details)");
             } else {
                 Serial.println("[test] Sending a test text to the owner");
-                smsSend(ownerPhone, "MotoGuard+ test: the A7670G can text you. " + smsLocation());
+                smsSend(ownerPhone, "MotoGuard+ test: the A7670G can text you.\n" + smsLocation());
             }
             Serial.println("[test] smstest done");
         } else if (line.startsWith("smstry ")) {
