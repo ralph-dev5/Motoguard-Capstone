@@ -169,8 +169,8 @@
 #define LOCATION_INTERVAL_MOVING_MS 10000
 #define LOCATION_INTERVAL_PARKED_MS 120000
 #define SMS_COOLDOWN_MS 120000
-// WiFi build: the SIM800L is used for texts only. 9600 is what the module auto-detects reliably.
-#define SMS_MODEM_BAUD 9600
+// WiFi build: the A7670G is used for texts only. It talks at 115200 out of the box.
+#define SMS_MODEM_BAUD 115200
 #define SMS_STATUS_INTERVAL_MS 30000   // how often the modem's SIM/network status is re-read
 // A theft text that fails is retried, since a weak signal drops the modem off the network briefly.
 #define SMS_RETRY_INTERVAL_MS 20000    // gap between tries

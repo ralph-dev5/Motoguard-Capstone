@@ -4,7 +4,7 @@
 
 #ifdef USE_WIFI
 
-// The WiFi build drives the SIM800L with plain AT commands instead of TinyGSM: only SMS is needed
+// The WiFi build drives the A7670G with plain AT commands instead of TinyGSM: only SMS is needed
 // here, and TinyGSM's blocking network bring-up would stall the loop while the modem is absent.
 static HardwareSerial sim(2);
 
@@ -43,7 +43,7 @@ static void refresh(bool verbose) {
         simReady = registered = false;
         signalQuality = -1;
         if (wasAnswering || verbose) {
-            Serial.println("[sms] SIM800L is not answering: no texts can be sent. Check its 5V 2A supply, "
+            Serial.println("[sms] A7670G is not answering: no texts can be sent. Check its 5V 2A supply, "
                            "GND joined to the ESP32, TXD->GPIO16, RXD->GPIO17");
         }
         return;
@@ -59,6 +59,11 @@ static void refresh(bool verbose) {
 
     String reg = ask("AT+CREG?");
     registered = reg.indexOf(",1") >= 0 || reg.indexOf(",5") >= 0;   // home network or roaming
+    if (!registered) {
+        // On 4G the A7670G can be attached over LTE while the 2G/3G register still reads 0.
+        String lte = ask("AT+CEREG?");
+        registered = lte.indexOf(",1") >= 0 || lte.indexOf(",5") >= 0;
+    }
 
     String csq = ask("AT+CSQ");
     int at = csq.indexOf("+CSQ: ");
@@ -67,9 +72,9 @@ static void refresh(bool verbose) {
     if (verbose || !everReported || wasAnswering != answering || wasReady != simReady || wasRegistered != registered) {
         everReported = true;
         if (!simReady) {
-            Serial.println("[sms] SIM800L answers but sees no SIM: push the card fully in, contacts toward the board");
+            Serial.println("[sms] A7670G answers but sees no SIM: push the card fully in, contacts toward the board");
         } else if (!registered) {
-            Serial.printf("[sms] SIM ready, not on the network yet (signal %d/31): check the antenna and that the SIM has 2G\n",
+            Serial.printf("[sms] SIM ready, not on the network yet (signal %d/31): check the antenna on the 4G (MAIN) socket and that the SIM is registered\n",
                           signalQuality);
         } else {
             Serial.printf("[sms] Ready to text (signal %d/31)\n", signalQuality);
@@ -80,7 +85,7 @@ static void refresh(bool verbose) {
 void smsBegin() {
     sim.begin(SMS_MODEM_BAUD, SERIAL_8N1, PIN_MODEM_RX, PIN_MODEM_TX);
     delay(300);
-    // The SIM800L picks its baud rate from the first "AT"s it hears.
+    // The first "AT"s wake the modem's serial port.
     for (int i = 0; i < 4; i++) {
         sim.println("AT");
         delay(120);
@@ -146,7 +151,7 @@ bool smsSend(const String& number, const String& message) {
         refresh(false);
     }
     if (!smsReady()) {
-        Serial.printf("[sms] Not sent: %s\n", !answering ? "the SIM800L is not answering"
+        Serial.printf("[sms] Not sent: %s\n", !answering ? "the A7670G is not answering"
                                               : !simReady ? "no SIM detected"
                                                           : "not registered on the network");
         return false;
