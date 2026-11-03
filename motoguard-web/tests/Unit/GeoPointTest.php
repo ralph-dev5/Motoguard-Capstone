@@ -22,6 +22,10 @@ test('it builds a Google Maps link', function () {
     expect((new GeoPoint(14.5995, 120.9842))->mapsUrl())->toBe('https://maps.google.com/?q=14.599500,120.984200');
 });
 
+test('it writes plain coordinates for a text message', function () {
+    expect((new GeoPoint(14.5995, 120.9842))->coordinates())->toBe('14.59950,120.98420');
+});
+
 test('it rejects impossible coordinates', function () {
     new GeoPoint(91, 0);
 })->throws(InvalidArgumentException::class);

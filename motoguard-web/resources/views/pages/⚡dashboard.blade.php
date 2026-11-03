@@ -60,11 +60,13 @@ new #[Title('Dashboard')] class extends Component {
     #[Computed]
     public function security(): array
     {
-        $theft = Alert::query()
+        $theftAlerts = Alert::query()
             ->whereIn('device_id', $this->devices->modelKeys())
             ->unacknowledged()
-            ->where(fn ($query) => $query->where('level', AlertLevel::TheftAttempt)->orWhereNull('level'))
-            ->count();
+            ->where(fn ($query) => $query->where('level', AlertLevel::TheftAttempt)->orWhereNull('level'));
+        $theft = (clone $theftAlerts)->count();
+        // Where the newest theft alert put the motorcycle, for the banner's map button.
+        $theftMap = $theft > 0 ? (clone $theftAlerts)->whereNotNull('location')->latest()->first()?->location?->mapsUrl() : null;
         $open = (int) $this->devices->sum('open_alerts_count');
         $online = $this->devices->filter->isRecentlySeen();
 
@@ -78,6 +80,7 @@ new #[Title('Dashboard')] class extends Component {
                 'tone' => 'bad', 'icon' => 'shield-exclamation',
                 'title' => trans_choice('{1} :count theft alert needs your attention|[2,*] :count theft alerts need your attention', $theft, ['count' => $theft]),
                 'text' => __('Check where your motorcycle is, then acknowledge the alerts once it is safe.'),
+                'map' => $theftMap,
             ],
             $open > 0 => [
                 'tone' => 'warn', 'icon' => 'exclamation-triangle',
@@ -173,6 +176,9 @@ new #[Title('Dashboard')] class extends Component {
                 <div class="font-semibold">{{ $security['title'] }}</div>
                 <div class="text-sm opacity-80">{{ $security['text'] }}</div>
             </div>
+            @if (! empty($security['map']))
+                <flux:button size="sm" icon="map-pin" :href="$security['map']" target="_blank" rel="noopener">{{ __('Open in Google Maps') }}</flux:button>
+            @endif
             @if (in_array($security['tone'], ['bad', 'warn']) && $this->devices->sum('open_alerts_count') > 0)
                 <flux:button size="sm" variant="primary" color="red" :href="route('alerts.index', ['state' => 'open'])" wire:navigate icon:trailing="arrow-right">{{ __('Review alerts') }}</flux:button>
             @elseif ($this->devices->isEmpty())

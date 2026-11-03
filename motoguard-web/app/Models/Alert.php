@@ -68,7 +68,9 @@ class Alert extends Model
 
     public function smsMessage(): string
     {
-        $where = $this->location?->mapsUrl() ?? 'GPS location not available yet.';
+        $where = $this->location
+            ? 'Location (paste in Google Maps): '.$this->location->coordinates()
+            : 'GPS location not available yet.';
 
         $what = $this->level ? "{$this->level->label()} - {$this->type->label()}" : $this->type->label();
 

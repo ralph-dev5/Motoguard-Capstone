@@ -64,6 +64,15 @@ final readonly class GeoPoint implements JsonSerializable
     }
 
     /**
+     * "lat,lng" for a text message. Philippine networks drop person-to-person texts that contain a
+     * link, so an SMS carries the bare coordinates, which open the spot when pasted into Google Maps.
+     */
+    public function coordinates(): string
+    {
+        return sprintf('%.5F,%.5F', $this->lat, $this->lng);
+    }
+
+    /**
      * @return array{lat: float, lng: float}
      */
     public function toArray(): array
