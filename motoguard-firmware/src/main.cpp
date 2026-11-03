@@ -554,6 +554,7 @@ static void serviceOutbox(unsigned long now) {
  *   status       what is waiting in the outbox, and free memory
  *   simcheck     SIM, network, signal, SMS centre and the SIM800L's supply voltage
  *   smstest      text the owner's number now, without an alarm
+ *   smstry <msg> text the owner exactly <msg>, to see what the network lets through
  *   gpsdiag      probe the GPS wires: is GPIO26 driven, which baud gives data, are TX/RX swapped
  *   at <cmd>     send one AT command to the SIM800L and print its reply (e.g. "at AT+CSQ")
  *   unpair       forget every phone paired over Bluetooth
@@ -594,6 +595,13 @@ static void serviceSerialCommands() {
                 smsSend(ownerPhone, "MotoGuard+ test: the A7670G can text you. " + smsLocation());
             }
             Serial.println("[test] smstest done");
+        } else if (line.startsWith("smstry ")) {
+            if (ownerPhone.length() == 0) {
+                Serial.println("[test] No owner number yet: add it on the dashboard (device page, Details)");
+            } else {
+                smsSend(ownerPhone, line.substring(7));
+            }
+            Serial.println("[test] smstry done");
         } else if (line == "unpair") {
             ownerForgetPhones();
         } else if (line.startsWith("at ")) {
