@@ -199,7 +199,7 @@ void netBegin() {
     // Usual WiFi first, then the owner's phone hotspot, and only then the setup page: an owner
     // riding away from home should never land on a setup portal.
     if (!button) {
-        connected = joinNetwork(primarySsid, primaryPass, 8000, false);
+        connected = joinNetwork(primarySsid, primaryPass, 15000, false);
         if (!connected && joinNetwork(backupSsid, backupPass, 10000)) {
             connected = true;
             onBackup = true;

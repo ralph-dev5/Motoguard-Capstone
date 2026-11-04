@@ -33,7 +33,7 @@
 // With no saved WiFi, or when BOOT is pressed within 3 s of power-on, the ESP32 opens this hotspot.
 #define SETUP_AP_NAME "MotoGuard-Setup"
 #define SETUP_AP_PASS "motoguard"      // at least 8 characters
-#define SETUP_PORTAL_TIMEOUT_S 180     // only once WiFi is saved; first setup waits indefinitely
+#define SETUP_PORTAL_TIMEOUT_S 60      // only once WiFi is saved; first setup waits indefinitely
 #define OTA_HOSTNAME "motoguard"     // flash over WiFi: motoguard.local
 #define OTA_PASSWORD "motoguard"     // password espota must present
 #define PIN_SETUP_BUTTON 0             // BOOT button

@@ -743,7 +743,11 @@ void loop() {
             serverLostSinceMs = now;
             // Not on 4G: a WiFi scan there blocks the loop and breaks the mobile-data session, and
             // the switch back to WiFi already happens by itself once WiFi is in reach.
-            if (network.length() > 0 && !netOnCellular()) {
+            // Not for the online server either: it is reachable from any network, so failing pings
+            // mean the server itself is down (a Render restart), and leaving a working WiFi to look
+            // for the phone hotspot would only take the device offline.
+            bool lanServer = settingsServer().port != 443;
+            if (network.length() > 0 && !netOnCellular() && lanServer) {
                 Serial.println("[net] Server unreachable on this network, trying the other one");
                 netSwitchNetwork();
             }
