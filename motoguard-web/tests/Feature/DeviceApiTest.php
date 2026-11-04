@@ -385,3 +385,33 @@ test('a device cannot mark another device alert as texted', function () {
 
     expect($alert->fresh()->sms_sent)->toBeFalse();
 });
+
+test('heartbeat records whether the device is on WiFi or the A7670G mobile data', function () {
+    $device = Device::factory()->create(['hotspot_ssid' => 'My iPhone']);
+    Sanctum::actingAs($device, [Device::TOKEN_ABILITY]);
+
+    $this->postJson(route('api.device.heartbeat'), ['network' => 'wifi', 'network_name' => 'Home_2.4GHz'])->assertOk();
+    expect($device->fresh())->network->toBe('wifi')->network_name->toBe('Home_2.4GHz');
+
+    $this->postJson(route('api.device.heartbeat'), ['network' => 'cellular', 'network_name' => 'ignored'])->assertOk();
+    expect($device->fresh())->network->toBe('cellular')->network_name->toBeNull();
+
+    $this->postJson(route('api.device.heartbeat'), ['network' => 'satellite'])->assertUnprocessable();
+});
+
+test('the device page shows how the device is connected', function () {
+    $user = User::factory()->create();
+    $device = Device::factory()->for($user)->create([
+        'hotspot_ssid' => 'My iPhone',
+        'last_seen_at' => now(),
+        'network' => 'cellular',
+    ]);
+
+    $this->actingAs($user)->get(route('devices.show', $device))->assertSee('Mobile data (A7670G 4G)');
+
+    $device->update(['network' => 'wifi', 'network_name' => 'My iPhone']);
+    $this->actingAs($user)->get(route('devices.show', $device))->assertSee('Phone hotspot');
+
+    $device->update(['network_name' => 'Home_2.4GHz']);
+    $this->actingAs($user)->get(route('devices.show', $device))->assertSee('Home WiFi')->assertSee('Home_2.4GHz');
+});

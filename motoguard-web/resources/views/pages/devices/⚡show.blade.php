@@ -204,7 +204,10 @@ new #[Title('Motorcycle')] class extends Component {
         </div>
         <div class="moto-card p-3">
             <flux:text class="text-xs">{{ __('Connection') }}</flux:text>
-            <div class="mt-1.5"><x-device-status :device="$device" wire:key="presence-{{ $device->id }}" /></div>
+            <div class="mt-1.5 flex flex-wrap gap-1.5">
+                <x-device-status :device="$device" wire:key="presence-{{ $device->id }}" />
+                <x-network-status :device="$device" />
+            </div>
         </div>
         <div class="moto-card p-3">
             <flux:text class="text-xs">{{ __('GPS') }}</flux:text>

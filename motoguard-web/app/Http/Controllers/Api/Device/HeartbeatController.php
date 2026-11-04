@@ -19,6 +19,8 @@ class HeartbeatController extends Controller
             $request->has('gps_chars') ? $request->integer('gps_chars') : null,
             $request->has('gps_satellites') ? $request->integer('gps_satellites') : null,
             $request->has('owner_nearby') ? $request->boolean('owner_nearby') : null,
+            $request->validated('network'),
+            $request->validated('network_name'),
         ));
     }
 }

@@ -24,8 +24,13 @@ class DeviceTelemetry
     /**
      * @return array{armed: bool, safe_zone: array{lat: float, lng: float, radius_m: int}|null, server_time: string}
      */
-    public function heartbeat(Device $device, ?float $batteryVoltage, ?GeoPoint $location, ?string $reportedState = null, ?int $gpsChars = null, ?int $gpsSatellites = null, ?bool $ownerNearby = null): array
+    public function heartbeat(Device $device, ?float $batteryVoltage, ?GeoPoint $location, ?string $reportedState = null, ?int $gpsChars = null, ?int $gpsSatellites = null, ?bool $ownerNearby = null, ?string $network = null, ?string $networkName = null): array
     {
+        if ($network !== null) {
+            $device->network = $network;
+            $device->network_name = $network === 'wifi' ? $networkName : null;
+        }
+
         if ($ownerNearby !== null) {
             $device->owner_nearby = $ownerNearby;
             if ($ownerNearby) {

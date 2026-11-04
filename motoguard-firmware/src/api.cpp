@@ -148,6 +148,13 @@ HeartbeatResult apiHeartbeat(const char* state, float batteryVolts, const GpsFix
     // dashboard whether the antenna is hearing anything.
     root["gps_satellites"] = health.satellitesInView;
     root["owner_nearby"] = ownerNearby;
+    // Shown on the dashboard: the usual WiFi / phone hotspot (by name), or the A7670G's 4G data.
+    if (netOnCellular()) {
+        root["network"] = "cellular";
+    } else {
+        root["network"] = "wifi";
+        root["network_name"] = netNetworkName();
+    }
 
     JsonDocument response;
     HeartbeatResult result = {false, true, false, false, String()};

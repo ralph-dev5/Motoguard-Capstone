@@ -246,6 +246,7 @@ new #[Title('Dashboard')] class extends Component {
                 </div>
 
                 <flux:text class="mt-3 text-sm">{{ __('Last seen') }} <span class="font-medium text-zinc-900 dark:text-white">{{ $device->last_seen_at?->diffForHumans() ?? __('never') }}</span></flux:text>
+                <x-network-status :device="$device" class="mt-2" />
 
                 <div class="mt-4 flex items-center justify-between gap-2">
                     <flux:text class="flex items-center gap-1 text-sm">

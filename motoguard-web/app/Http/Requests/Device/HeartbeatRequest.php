@@ -25,6 +25,9 @@ class HeartbeatRequest extends FormRequest
             'gps_satellites' => ['nullable', 'integer', 'between:0,64'],
             // The owner's paired phone is connected over Bluetooth; motion alarms are held off meanwhile.
             'owner_nearby' => ['nullable', 'boolean'],
+            // How this heartbeat arrived: WiFi (and its name) or the A7670G's 4G mobile data.
+            'network' => ['nullable', 'string', 'in:wifi,cellular'],
+            'network_name' => ['nullable', 'string', 'max:64'],
         ];
     }
 }
