@@ -400,6 +400,11 @@ public:
     }
 
     uint8_t connected() override {
+        // The server closes an idle kept-open connection; the modem says so unasked (+IPCLOSE).
+        // Pick that up here, or the next request goes into a dead connection and times out.
+        if (open) {
+            drain();
+        }
         return open || rxPos < rx.size();
     }
 
@@ -596,6 +601,7 @@ static SSLClient& cellClient() {
 }
 
 static bool onCell = false;
+static String netMode = "auto";   // the owner's choice, see netSetMode()
 static unsigned long lastCellTryMs = 0;
 
 // Data uses the LTE data context (1). A context the modem has held for hours can open TCP
@@ -640,7 +646,9 @@ static bool cellEnsureConnected() {
     }
 
     // Give the WiFi a while first, so a short dropout at home doesn't start using mobile data.
-    if (disconnectedSinceMs == 0 || now - disconnectedSinceMs < CELL_FALLBACK_MS) {
+    // Not when the owner chose mobile data: then there is no WiFi to wait for.
+    bool cellChosen = netMode == "cellular";
+    if (!cellChosen && (disconnectedSinceMs == 0 || now - disconnectedSinceMs < CELL_FALLBACK_MS)) {
         return false;
     }
     if (lastCellTryMs != 0 && now - lastCellTryMs < CELL_RETRY_MS) {
@@ -653,7 +661,8 @@ static bool cellEnsureConnected() {
         return false;
     }
 
-    Serial.println("[net] No WiFi - starting 4G mobile data");
+    Serial.println(cellChosen ? "[net] Mobile data chosen on the dashboard - starting 4G"
+                              : "[net] No WiFi - starting 4G mobile data");
     if (!cellDataUp()) {
         Serial.printf("[net] 4G mobile data failed, trying again in %d s\n", CELL_RETRY_MS / 1000);
         return false;
@@ -669,9 +678,72 @@ bool netOnCellular() {
     return onCell;
 }
 
+// A choice that has not connected for this long is dropped for automatic, so a wrong choice (WiFi
+// only while away from home, mobile data with no signal) can't leave the device unreachable.
+#define NET_MODE_GIVE_UP_MS 180000UL
+static unsigned long lastNetOkMs = 0;
+
+void netSetMode(const String& mode) {
+    String wanted = (mode == "wifi" || mode == "cellular") ? mode : String("auto");
+    if (wanted == netMode) {
+        return;
+    }
+    Serial.printf("[net] Network chosen on the dashboard: %s\n",
+                  wanted == "wifi" ? "home WiFi only" : wanted == "cellular" ? "mobile data only" : "automatic");
+    String was = netMode;
+    netMode = wanted;
+    lastNetOkMs = millis();
+    if (wanted == "cellular") {
+        // Off WiFi, so the requests go over the modem; the WiFi radio stays in station mode.
+        WiFi.disconnect();
+        secureClient.stop();
+        client.stop();
+        disconnectedSinceMs = millis();
+        lastCellTryMs = 0;
+    } else if (was == "cellular") {
+        WiFi.reconnect();
+    }
+    if (wanted == "wifi" && onCell) {
+        Serial.println("[net] 4G mobile data off - home WiFi only");
+        cellClient().stop();
+        onCell = false;
+    }
+}
+
+static bool netEnsureConnectedChosen() {
+    if (netMode == "cellular") {
+        return cellEnsureConnected();
+    }
+    if (wifiEnsureConnected()) {
+        if (onCell) {
+            Serial.println("[net] WiFi is back - 4G mobile data off");
+            cellClient().stop();
+            onCell = false;
+            lastCellTryMs = 0;
+        }
+        return true;
+    }
+    if (netMode == "wifi") {
+        return false;
+    }
+    return cellEnsureConnected();
+}
+
 bool netEnsureConnected() {
     if (netSimulatingOffline()) {
         return false;
+    }
+    if (netMode != "auto") {
+        bool ok = netEnsureConnectedChosen();
+        unsigned long now = millis();
+        if (ok) {
+            lastNetOkMs = now;
+        } else if (now - lastNetOkMs >= NET_MODE_GIVE_UP_MS) {
+            Serial.printf("[net] %s has not connected for %lu min - back to automatic\n",
+                          netMode == "wifi" ? "Home WiFi" : "Mobile data", NET_MODE_GIVE_UP_MS / 60000UL);
+            netSetMode("auto");
+        }
+        return ok;
     }
     if (wifiEnsureConnected()) {
         if (onCell) {
@@ -862,6 +934,9 @@ bool netDiscoverPoll(String&, uint16_t&) {
 void netSimulateOffline(unsigned long) {}
 
 void netSimulateNoWifi(unsigned long) {}
+
+// The mobile-data build has no WiFi to choose.
+void netSetMode(const String&) {}
 
 bool netSimulatingOffline() {
     return false;

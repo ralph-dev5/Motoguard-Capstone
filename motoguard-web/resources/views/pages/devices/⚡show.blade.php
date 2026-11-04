@@ -78,6 +78,23 @@ new #[Title('Motorcycle')] class extends Component {
             : __('Disarming. The badge changes once the device confirms it.'));
     }
 
+    public function setNetworkMode(string $mode): void
+    {
+        $this->authorize('update', $this->device);
+
+        if (! in_array($mode, ['auto', 'wifi', 'cellular'], true)) {
+            return;
+        }
+
+        app(DeviceTelemetry::class)->setNetworkMode($this->device, $mode);
+
+        Flux::toast(text: match ($mode) {
+            'wifi' => __('Switching to home WiFi only. The device changes over within a few seconds.'),
+            'cellular' => __('Switching to mobile data (A7670G 4G). The device changes over within a few seconds.'),
+            default => __('Automatic: home WiFi first, mobile data when WiFi is out of reach.'),
+        });
+    }
+
     public function requestCalibration(): void
     {
         $this->authorize('update', $this->device);
@@ -221,6 +238,31 @@ new #[Title('Motorcycle')] class extends Component {
             <flux:text class="text-xs">{{ __('Last seen') }}</flux:text>
             <div class="mt-1.5 font-medium text-zinc-900 dark:text-white">{{ $device->last_seen_at?->diffForHumans() ?? __('Never') }}</div>
         </div>
+    </div>
+
+    {{-- Which network the device uses. Applied by the device at its next check-in. --}}
+    <div class="moto-card flex flex-wrap items-center justify-between gap-3 p-3">
+        <div class="min-w-0">
+            <flux:text class="text-xs">{{ __('Network') }}</flux:text>
+            <flux:text class="text-sm">
+                @switch($device->network_mode)
+                    @case('wifi') {{ __('Home WiFi only: never uses mobile data.') }} @break
+                    @case('cellular') {{ __('Mobile data only: uses the A7670G 4G even when WiFi is in range.') }} @break
+                    @default {{ __('Automatic: home WiFi first, mobile data when WiFi is out of reach.') }}
+                @endswitch
+            </flux:text>
+        </div>
+        <flux:button.group>
+            @foreach (['auto' => ['arrows-right-left', __('Auto')], 'wifi' => ['wifi', __('Home WiFi')], 'cellular' => ['signal', __('Mobile data')]] as $mode => [$icon, $label])
+                <flux:button
+                    size="sm"
+                    :icon="$icon"
+                    :variant="$device->network_mode === $mode ? 'primary' : 'outline'"
+                    wire:click="setNetworkMode('{{ $mode }}')"
+                    wire:key="network-mode-{{ $mode }}"
+                >{{ $label }}</flux:button>
+            @endforeach
+        </flux:button.group>
     </div>
 
     {{--

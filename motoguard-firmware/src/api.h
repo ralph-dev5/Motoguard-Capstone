@@ -15,6 +15,7 @@ struct HeartbeatResult {
     bool rejected;        // the server no longer accepts this board's token
     bool hasOwnerPhone;   // the server sent the number to text (empty when none is set)
     String ownerPhone;
+    String networkMode;   // "auto" | "wifi" | "cellular", chosen on the dashboard ("" from an older server)
 };
 
 HeartbeatResult apiHeartbeat(const char* state, float batteryVolts, const GpsFix& fix, bool ownerNearby);

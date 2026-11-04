@@ -45,7 +45,7 @@ static bool smsEverSent = false;
 #endif
 #ifndef PRESENCE_PING_INTERVAL_CELL_MS
 // On 4G mobile data: still twice inside the dashboard's 20 s presence window, at half the data.
-#define PRESENCE_PING_INTERVAL_CELL_MS 10000
+#define PRESENCE_PING_INTERVAL_CELL_MS 5000
 #endif
 static String pendingSmsNumber;
 static String pendingSmsText;
@@ -772,6 +772,9 @@ void loop() {
                 applyOwnerPhone(heartbeat.ownerPhone);
             }
             applyArmed(heartbeat.armed);
+            if (heartbeat.networkMode.length() > 0) {
+                netSetMode(heartbeat.networkMode);
+            }
             if (heartbeat.calibrate && motionReady && !calibrationActive() && !calibrationUnsent) {
                 calibrationStart();
             }

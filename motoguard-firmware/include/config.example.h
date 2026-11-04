@@ -157,7 +157,7 @@
 #define PRESENCE_PING_INTERVAL_MS 1000
 // Over HTTPS (the online server) each request costs more, so the pings are spaced out; the
 // dashboard's 20 s presence window still sees several of them.
-#define PRESENCE_PING_INTERVAL_TLS_MS 5000
+#define PRESENCE_PING_INTERVAL_TLS_MS 3000
 // A first HTTPS request includes the TLS handshake, which takes this chip a second or two.
 #define TLS_MIN_TIMEOUT_MS 8000
 // On a stand-in server found on the local network: how often to try the home server again.

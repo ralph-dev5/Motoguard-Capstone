@@ -27,3 +27,7 @@ void netSimulateOffline(unsigned long durationMs);
 // Test aid: WiFi off for durationMs while mobile data stays allowed, to show the 4G fallback.
 void netSimulateNoWifi(unsigned long durationMs);
 bool netSimulatingOffline();
+// The owner's choice on the dashboard: "auto" (WiFi first, 4G when it is lost), "wifi" (never
+// mobile data) or "cellular" (4G even with WiFi in range). Falls back to auto by itself when the
+// chosen network has not connected for a few minutes, so the device never stays unreachable.
+void netSetMode(const String& mode);

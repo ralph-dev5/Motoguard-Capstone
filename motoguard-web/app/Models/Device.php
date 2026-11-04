@@ -41,6 +41,7 @@ use Laravel\Sanctum\HasApiTokens;
  * @property float|null $battery_voltage
  * @property string|null $network
  * @property string|null $network_name
+ * @property string $network_mode
  * @property int|null $gps_chars
  * @property int|null $gps_satellites
  * @property CarbonImmutable|null $gps_fix_at
@@ -53,7 +54,7 @@ use Laravel\Sanctum\HasApiTokens;
  * @property CarbonImmutable|null $updated_at
  */
 #[Hidden(['hotspot_password'])]
-#[Fillable(['name', 'plate_number', 'serial', 'owner_phone', 'hotspot_ssid', 'hotspot_password', 'owner_nearby', 'owner_seen_at', 'is_armed', 'reported_armed', 'calibration_requested_at', 'calibrated_at', 'calibration', 'status', 'battery_voltage', 'network', 'network_name', 'gps_chars', 'gps_satellites', 'gps_fix_at', 'last_seen_at', 'last_location', 'safe_zone_center', 'safe_zone_radius_m', 'parked_at'])]
+#[Fillable(['name', 'plate_number', 'serial', 'owner_phone', 'hotspot_ssid', 'hotspot_password', 'owner_nearby', 'owner_seen_at', 'is_armed', 'reported_armed', 'calibration_requested_at', 'calibrated_at', 'calibration', 'status', 'battery_voltage', 'network', 'network_name', 'network_mode', 'gps_chars', 'gps_satellites', 'gps_fix_at', 'last_seen_at', 'last_location', 'safe_zone_center', 'safe_zone_radius_m', 'parked_at'])]
 class Device extends Model implements AuthenticatableContract
 {
     /** @use HasFactory<DeviceFactory> */
