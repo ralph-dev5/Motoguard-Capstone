@@ -14,8 +14,6 @@
 #include "settings.h"
 #include "sms.h"
 
-#define TINY_GSM_RX_BUFFER 1024
-#include <TinyGsmClient.h>
 #include <SSLClient.h>
 #include <vector>
 
@@ -295,56 +293,16 @@ static bool wifiEnsureConnected() {
 }
 
 // ---- 4G fallback: the A7670G that sends the texts also carries the data when no WiFi is in reach.
-// TinyGSM is only used for the data link. Its init() is never called: it would switch the modem to
-// numeric replies ("0" instead of "OK"), which the SMS code does not understand.
-#ifdef CELL_DEBUG
-// Bench aid: copies everything said on the modem line to the USB log, marked "<" and ">".
-class CellTap : public Stream {
-public:
-    explicit CellTap(Stream& line) : line(line) {}
-    int available() override { return line.available(); }
-    int read() override {
-        int c = line.read();
-        if (c >= 0) {
-            mark('<');
-            Serial.write((uint8_t) c);
-        }
-        return c;
-    }
-    int peek() override { return line.peek(); }
-    void flush() override { line.flush(); }
-    size_t write(uint8_t c) override {
-        mark('>');
-        Serial.write(c);
-        return line.write(c);
-    }
-private:
-    void mark(char dir) {
-        if (dir != last) {
-            Serial.printf("\n%c ", dir);
-            last = dir;
-        }
-    }
-    Stream& line;
-    char last = 0;
-};
-#endif
-
-static TinyGsm& cellModem() {
-#ifdef CELL_DEBUG
-    static CellTap tap(smsSerial());
-    static TinyGsm modem(tap);
-#else
-    static TinyGsm modem(smsSerial());
-#endif
-    return modem;
-}
+// Everything is plain AT commands on the SMS line (see CellTcpClient below).
 
 // A plain TCP connection over 4G, through the modem's CIP service (link 0). TLS can't be
 // left to the modem: the A7670G's own handshake fails with Render (and Cloudflare) though it works
 // with Google, so the ESP32 does TLS on top of this (SSLClient, below). TinyGSM's client can't be
 // used either: before opening it sends AT+CTCPKA, which the A7670G rejects, and then gives up.
 // (The CCH service is no good for plain TCP here: it opens, then refuses to send.)
+// Connections in a row that sent a request but got nothing back; see cellEnsureConnected().
+static int cellSilentConnections = 0;
+
 class CellTcpClient : public Client {
 public:
     int connect(IPAddress ip, uint16_t port) override {
@@ -424,6 +382,14 @@ public:
     }
 
     void stop() override {
+        if (sentBytes > 0 || gotBytes > 0) {
+            // One line per connection: shows whether the server answered at all.
+            Serial.printf("[4g] connection closed: sent %u B, received %u B\n", sentBytes, gotBytes);
+        }
+        if (sentBytes > 0) {
+            cellSilentConnections = gotBytes > 0 ? 0 : cellSilentConnections + 1;
+        }
+        sentBytes = gotBytes = 0;
         if (open) {
             ask("AT+CIPCLOSE=0", "+CIPCLOSE: 0,", 5000);
         }
@@ -507,12 +473,16 @@ private:
                 stop();
                 return false;
             }
+            // The modem drops the first bytes if they follow its ">" at once; the debug build only
+            // worked because its logging left this gap.
+            delay(20);
             smsSerial().write(tx.data(), n);
             if (collect("+CIPSEND: 0,", 10000).indexOf("+CIPSEND: 0,") < 0) {
                 stop();
                 return false;
             }
             tx.erase(tx.begin(), tx.begin() + n);
+            sentBytes += n;
         }
         return true;
     }
@@ -591,6 +561,7 @@ private:
             if (c >= 0) {
                 rx.push_back((uint8_t) c);
                 got++;
+                gotBytes++;
             }
         }
         collect("OK", 2000);
@@ -602,6 +573,8 @@ private:
     std::vector<uint8_t> rx;
     size_t rxPos = 0;
     unsigned long lastFetchMs = 0;
+    unsigned sentBytes = 0;
+    unsigned gotBytes = 0;
 };
 
 static CellTcpClient& cellTcp() {
@@ -625,10 +598,40 @@ static SSLClient& cellClient() {
 static bool onCell = false;
 static unsigned long lastCellTryMs = 0;
 
+// Data uses the LTE data context (1). A context the modem has held for hours can open TCP
+// connections that then never deliver a reply; switching it off and on again (a fresh one from
+// the network) cures that. TinyGSM's gprsConnect is not used: it detaches from LTE entirely
+// (AT+CGATT=0), which takes the modem off the network for a while.
+static bool cellDataActive() {
+    return smsCommand("AT+CGACT?", 3000).indexOf("+CGACT: 1,1") >= 0;
+}
+
+static bool cellDataUp() {
+    smsCommand("AT+NETCLOSE", 10000);
+    smsCommand(String("AT+CGDCONT=1,\"IP\",\"") + SIM_APN + "\"", 3000);
+    smsCommand("AT+CGACT=0,1", 15000);
+    smsCommand("AT+CGACT=1,1", 30000);
+    return cellDataActive();
+}
+
 static bool cellEnsureConnected() {
     unsigned long now = millis();
     if (onCell) {
-        if (cellModem().isGprsConnected()) {
+        // Checked at most every 10 s: every request comes through here.
+        static unsigned long lastCheckMs = 0;
+        static bool lastActive = true;
+        if (now - lastCheckMs >= 10000) {
+            lastCheckMs = now;
+            lastActive = cellDataActive();
+        }
+        if (lastActive && cellSilentConnections >= 2) {
+            // Two connections in a row went out but nothing came back: refresh the data link.
+            Serial.println("[net] 4G link not answering - reconnecting mobile data");
+            cellClient().stop();
+            cellSilentConnections = 0;
+            lastActive = cellDataUp();
+        }
+        if (lastActive) {
             return true;
         }
         Serial.println("[net] 4G mobile data dropped");
@@ -651,7 +654,7 @@ static bool cellEnsureConnected() {
     }
 
     Serial.println("[net] No WiFi - starting 4G mobile data");
-    if (!cellModem().gprsConnect(SIM_APN, SIM_APN_USER, SIM_APN_PASS)) {
+    if (!cellDataUp()) {
         Serial.printf("[net] 4G mobile data failed, trying again in %d s\n", CELL_RETRY_MS / 1000);
         return false;
     }
