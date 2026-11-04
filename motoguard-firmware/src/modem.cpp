@@ -20,7 +20,7 @@
 #include <vector>
 
 #ifndef CELL_FALLBACK_MS
-#define CELL_FALLBACK_MS 45000   // no WiFi for this long: carry the data over 4G instead
+#define CELL_FALLBACK_MS 20000   // no WiFi for this long: carry the data over 4G instead
 #endif
 #ifndef CELL_RETRY_MS
 #define CELL_RETRY_MS 30000      // gap between attempts to start mobile data

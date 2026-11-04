@@ -106,7 +106,10 @@ bool apiPing(bool& syncRequested) {
     }
 
     String text;
-    int status = request("/api/v1/device/ping", String(), PRESENCE_PING_TIMEOUT_MS, text);
+    // The network rides on the ping too: on a weak 4G link the small ping gets through when the
+    // heartbeat does not, and the dashboard shows which network is in use.
+    const char* path = netOnCellular() ? "/api/v1/device/ping?net=cellular" : "/api/v1/device/ping?net=wifi";
+    int status = request(path, String(), PRESENCE_PING_TIMEOUT_MS, text);
     bool ok = isSuccess(status);
     if (ok) {
         syncRequested = text.indexOf("\"sync\":true") >= 0;

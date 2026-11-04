@@ -77,3 +77,14 @@ test('the badge shows a pinging device as on even when its heartbeat is stale', 
         ->assertOk()
         ->assertSee('Device on');
 });
+
+test('a ping reports whether the device is on WiFi or the A7670G mobile data', function () {
+    $device = Device::factory()->create(['network' => 'wifi', 'network_name' => 'Home_2.4GHz']);
+    $token = 'Bearer '.$device->issueToken();
+
+    $this->postJson(route('api.device.ping', ['net' => 'cellular']), [], ['Authorization' => $token])->assertOk();
+    expect($device->fresh())->network->toBe('cellular')->network_name->toBeNull();
+
+    $this->postJson(route('api.device.ping', ['net' => 'bogus']), [], ['Authorization' => $token])->assertOk();
+    expect($device->fresh()->network)->toBe('cellular');
+});

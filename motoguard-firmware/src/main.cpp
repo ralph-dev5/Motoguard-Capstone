@@ -579,7 +579,7 @@ static void serviceSerialCommands() {
         if (line.startsWith("nowifi")) {
             long seconds = constrain(line.substring(6).toInt(), 5L, 600L);
             netSimulateNoWifi((unsigned long) seconds * 1000UL);
-            Serial.printf("[test] WiFi off for %ld s: mobile data takes over after %d s\n", seconds, 45);
+            Serial.printf("[test] WiFi off for %ld s: mobile data takes over after %d s\n", seconds, 20);
         } else if (line.startsWith("offline")) {
             long seconds = constrain(line.substring(7).toInt(), 5L, 600L);
             netSimulateOffline((unsigned long) seconds * 1000UL);
@@ -730,6 +730,7 @@ void loop() {
         }
         if (newNetwork) {
             Serial.printf("[discover] Listening for the server on UDP %d\n", DISCOVERY_PORT);
+            lastHeartbeatMs = 0;   // the dashboard shows which network is in use: tell it now
         }
 
         // Connected, but the server is on another network (the laptop moved to the phone hotspot
@@ -740,7 +741,9 @@ void loop() {
             serverLostSinceMs = now;
         } else if (now - serverLostSinceMs >= SERVER_LOST_SWITCH_MS) {
             serverLostSinceMs = now;
-            if (network.length() > 0) {
+            // Not on 4G: a WiFi scan there blocks the loop and breaks the mobile-data session, and
+            // the switch back to WiFi already happens by itself once WiFi is in reach.
+            if (network.length() > 0 && !netOnCellular()) {
                 Serial.println("[net] Server unreachable on this network, trying the other one");
                 netSwitchNetwork();
             }
