@@ -43,6 +43,10 @@ static bool smsEverSent = false;
 #ifndef SMS_RETRY_WINDOW_MS
 #define SMS_RETRY_WINDOW_MS 300000     // give up after this long; the alert is old news by then
 #endif
+#ifndef PRESENCE_PING_INTERVAL_CELL_MS
+// On 4G mobile data: still twice inside the dashboard's 20 s presence window, at half the data.
+#define PRESENCE_PING_INTERVAL_CELL_MS 10000
+#endif
 static String pendingSmsNumber;
 static String pendingSmsText;
 static int pendingSmsTries = 0;
@@ -551,6 +555,7 @@ static void serviceOutbox(unsigned long now) {
 /**
  * Test commands over the USB serial line:
  *   offline 60   act as if there were no connection for 60 seconds
+ *   nowifi 120   switch WiFi off for 120 seconds, to watch the 4G mobile data fallback
  *   online       end that early
  *   status       what is waiting in the outbox, and free memory
  *   simcheck     SIM, network, signal, SMS centre and the SIM800L's supply voltage
@@ -571,7 +576,11 @@ static void serviceSerialCommands() {
             continue;
         }
         line.trim();
-        if (line.startsWith("offline")) {
+        if (line.startsWith("nowifi")) {
+            long seconds = constrain(line.substring(6).toInt(), 5L, 600L);
+            netSimulateNoWifi((unsigned long) seconds * 1000UL);
+            Serial.printf("[test] WiFi off for %ld s: mobile data takes over after %d s\n", seconds, 45);
+        } else if (line.startsWith("offline")) {
             long seconds = constrain(line.substring(7).toInt(), 5L, 600L);
             netSimulateOffline((unsigned long) seconds * 1000UL);
             Serial.printf("[test] Acting offline for %ld s: alerts and GPS points are kept, not sent\n", seconds);
@@ -605,6 +614,14 @@ static void serviceSerialCommands() {
             Serial.println("[test] smstry done");
         } else if (line == "unpair") {
             ownerForgetPhones();
+        } else if (line.startsWith("atw ")) {
+            // atw <seconds> <command>: for replies that come after OK (+HTTPACTION, +CCHOPEN, ...)
+            String rest = line.substring(4);
+            int space = rest.indexOf(' ');
+            unsigned long seconds = constrain(rest.substring(0, space).toInt(), 1L, 60L);
+            String reply = smsListen(rest.substring(space + 1), seconds * 1000UL);
+            reply.replace("\r\n", " | ");
+            Serial.printf("[at] %s -> %s\n", rest.substring(space + 1).c_str(), reply.c_str());
         } else if (line.startsWith("at ")) {
             String reply = smsCommand(line.substring(3), 10000);
             reply.replace("\r\n", " | ");
@@ -687,7 +704,10 @@ void loop() {
     }
 
     bool enrolled = settingsServer().token.length() > 0;
-    unsigned long pingInterval = settingsServer().port == 443 ? PRESENCE_PING_INTERVAL_TLS_MS : PRESENCE_PING_INTERVAL_MS;
+    // On 4G every ping costs the owner's mobile data, so the online badge is refreshed less often.
+    unsigned long pingInterval = netOnCellular()           ? PRESENCE_PING_INTERVAL_CELL_MS
+                                 : settingsServer().port == 443 ? PRESENCE_PING_INTERVAL_TLS_MS
+                                                                : PRESENCE_PING_INTERVAL_MS;
 
     // Presence first: the badge depends on this landing on time, and it is far cheaper than the
     // heartbeat below, which writes to a database in another region.

@@ -4,9 +4,13 @@
 
 #ifdef USE_WIFI
 
-// The WiFi build drives the A7670G with plain AT commands instead of TinyGSM: only SMS is needed
-// here, and TinyGSM's blocking network bring-up would stall the loop while the modem is absent.
+// Texts are sent with plain AT commands rather than TinyGSM, so a missing modem never stalls the
+// loop. TinyGSM only takes over the same line for 4G data, once WiFi is out of reach.
 static HardwareSerial sim(2);
+
+Stream& smsSerial() {
+    return sim;
+}
 
 static bool answering = false;
 static bool simReady = false;
@@ -38,7 +42,14 @@ static String ask(const char* cmd, unsigned long waitMs = 1500) {
 static void refresh(bool verbose) {
     bool wasAnswering = answering, wasReady = simReady, wasRegistered = registered;
 
-    answering = ask("AT", 800).indexOf("OK") >= 0;
+    String hello = ask("AT", 800);
+    answering = hello.indexOf("OK") >= 0;
+    // The command echoed back means the modem restarted since the last check (a supply dip while
+    // transmitting does that) and lost its settings, even though it never stopped answering.
+    bool restarted = answering && hello.indexOf("AT\r") >= 0;
+    if (restarted && wasAnswering) {
+        Serial.println("[sms] A7670G restarted - setting it up again");
+    }
     if (!answering) {
         simReady = registered = false;
         signalQuality = -1;
@@ -49,7 +60,7 @@ static void refresh(bool verbose) {
         return;
     }
 
-    if (!wasAnswering) {
+    if (!wasAnswering || restarted) {
         ask("ATE0");        // no echo, so replies are easy to read
         ask("AT+CMGF=1");   // text mode
         ask("AT+CMEE=2");   // errors in words, so a failed text says why
@@ -121,6 +132,23 @@ bool smsReady() {
 
 String smsCommand(const String& cmd, unsigned long waitMs) {
     String out = ask(cmd.c_str(), waitMs);
+    out.trim();
+    return out.length() > 0 ? out : String("(no reply)");
+}
+
+String smsListen(const String& cmd, unsigned long waitMs) {
+    while (sim.available()) {
+        sim.read();
+    }
+    sim.println(cmd);
+    String out;
+    unsigned long start = millis();
+    while (millis() - start < waitMs) {
+        while (sim.available()) {
+            out += (char) sim.read();
+        }
+        delay(5);
+    }
     out.trim();
     return out.length() > 0 ? out : String("(no reply)");
 }
@@ -215,6 +243,7 @@ void smsUpdate(unsigned long) {}
 bool smsReady() { return false; }
 bool smsSend(const String&, const String&) { return false; }
 String smsCommand(const String&, unsigned long) { return "(the mobile-data build has no direct modem line)"; }
+String smsListen(const String&, unsigned long) { return "(the mobile-data build has no direct modem line)"; }
 void smsDiagnose() {}
 
 #endif

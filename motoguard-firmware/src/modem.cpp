@@ -14,6 +14,18 @@
 #include "settings.h"
 #include "sms.h"
 
+#define TINY_GSM_RX_BUFFER 1024
+#include <TinyGsmClient.h>
+#include <SSLClient.h>
+#include <vector>
+
+#ifndef CELL_FALLBACK_MS
+#define CELL_FALLBACK_MS 45000   // no WiFi for this long: carry the data over 4G instead
+#endif
+#ifndef CELL_RETRY_MS
+#define CELL_RETRY_MS 30000      // gap between attempts to start mobile data
+#endif
+
 static WiFiClient client;
 // For the online server. Certificates are not checked (setInsecure): the link is encrypted, and
 // what the server trusts is the board's token, not the other way round.
@@ -233,11 +245,32 @@ bool netSimulatingOffline() {
     return offlineUntilMs != 0;
 }
 
-bool netEnsureConnected() {
-    if (netSimulatingOffline()) {
-        return false;
+// Test aid: WiFi is switched off for a while but mobile data is still allowed, to watch the 4G
+// fallback take over and hand back without walking away from the router.
+static unsigned long noWifiUntilMs = 0;
+
+void netSimulateNoWifi(unsigned long durationMs) {
+    noWifiUntilMs = durationMs > 0 ? millis() + durationMs : 0;
+    if (durationMs > 0) {
+        WiFi.disconnect();
+    } else {
+        WiFi.reconnect();
     }
+}
+
+static bool wifiEnsureConnected() {
     unsigned long now = millis();
+    if (noWifiUntilMs != 0) {
+        if ((long) (now - noWifiUntilMs) < 0) {
+            if (disconnectedSinceMs == 0) {
+                disconnectedSinceMs = now;
+            }
+            return false;
+        }
+        noWifiUntilMs = 0;
+        Serial.println("[test] WiFi allowed again");
+        WiFi.reconnect();
+    }
     if (WiFi.status() == WL_CONNECTED) {
         disconnectedSinceMs = 0;
         return true;
@@ -259,6 +292,395 @@ bool netEnsureConnected() {
         }
     }
     return false;
+}
+
+// ---- 4G fallback: the A7670G that sends the texts also carries the data when no WiFi is in reach.
+// TinyGSM is only used for the data link. Its init() is never called: it would switch the modem to
+// numeric replies ("0" instead of "OK"), which the SMS code does not understand.
+#ifdef CELL_DEBUG
+// Bench aid: copies everything said on the modem line to the USB log, marked "<" and ">".
+class CellTap : public Stream {
+public:
+    explicit CellTap(Stream& line) : line(line) {}
+    int available() override { return line.available(); }
+    int read() override {
+        int c = line.read();
+        if (c >= 0) {
+            mark('<');
+            Serial.write((uint8_t) c);
+        }
+        return c;
+    }
+    int peek() override { return line.peek(); }
+    void flush() override { line.flush(); }
+    size_t write(uint8_t c) override {
+        mark('>');
+        Serial.write(c);
+        return line.write(c);
+    }
+private:
+    void mark(char dir) {
+        if (dir != last) {
+            Serial.printf("\n%c ", dir);
+            last = dir;
+        }
+    }
+    Stream& line;
+    char last = 0;
+};
+#endif
+
+static TinyGsm& cellModem() {
+#ifdef CELL_DEBUG
+    static CellTap tap(smsSerial());
+    static TinyGsm modem(tap);
+#else
+    static TinyGsm modem(smsSerial());
+#endif
+    return modem;
+}
+
+// A plain TCP connection over 4G, through the modem's CIP service (link 0). TLS can't be
+// left to the modem: the A7670G's own handshake fails with Render (and Cloudflare) though it works
+// with Google, so the ESP32 does TLS on top of this (SSLClient, below). TinyGSM's client can't be
+// used either: before opening it sends AT+CTCPKA, which the A7670G rejects, and then gives up.
+// (The CCH service is no good for plain TCP here: it opens, then refuses to send.)
+class CellTcpClient : public Client {
+public:
+    int connect(IPAddress ip, uint16_t port) override {
+        return connect(ip.toString().c_str(), port);
+    }
+
+    int connect(const char* host, uint16_t port) override {
+        stop();
+        ask("AT+CIPCLOSE=0", "+CIPCLOSE: 0,", 3000);   // left open by a previous session
+        // "Received data waits until asked for" only takes effect while the data service is closed;
+        // otherwise replies are pushed out unasked and lost. So close it, set that, and reopen.
+        if (ask("AT+NETOPEN?", "OK", 2000).indexOf("+NETOPEN: 1") >= 0) {
+            ask("AT+NETCLOSE", "+NETCLOSE:", 10000);
+        }
+        ask("AT+CIPRXGET=1", "OK", 2000);
+        if (ask("AT+NETOPEN", "+NETOPEN:", 15000).indexOf("+NETOPEN: 0") < 0) {
+            Serial.println("[net] 4G: the modem's data service did not start");
+            return 0;
+        }
+        String cmd = String("AT+CIPOPEN=0,\"TCP\",\"") + host + "\"," + port;
+        String reply = ask(cmd.c_str(), "+CIPOPEN: 0,", 30000);
+        open = reply.indexOf("+CIPOPEN: 0,0") >= 0;
+        if (!open) {
+            Serial.printf("[net] 4G: could not open %s:%u\n", host, port);
+        }
+        return open ? 1 : 0;
+    }
+
+    size_t write(uint8_t b) override {
+        return write(&b, 1);
+    }
+
+    // HttpClient writes a request in many small pieces; they are sent as one, just before the reply
+    // is read, which saves a modem round trip per header line.
+    size_t write(const uint8_t* buf, size_t size) override {
+        if (!open) {
+            return 0;
+        }
+        tx.insert(tx.end(), buf, buf + size);
+        return size;
+    }
+
+    // TLS waits until available() covers a whole record (a certificate one is several KB), so data
+    // already held must not stop the modem being asked for more; it only limits how often.
+    int available() override {
+        size_t have = rx.size() - rxPos;
+        if (!open || !sendPending()) {
+            return have;
+        }
+        if (have == 0 || millis() - lastFetchMs >= 100) {
+            fetch();
+        }
+        return rx.size() - rxPos;
+    }
+
+    int read() override {
+        if (available() <= 0) {
+            return -1;
+        }
+        return (uint8_t) rx[rxPos++];
+    }
+
+    int read(uint8_t* buf, size_t size) override {
+        size_t n = 0;
+        while (n < size && available() > 0) {
+            buf[n++] = (uint8_t) rx[rxPos++];
+        }
+        return n;
+    }
+
+    int peek() override {
+        return available() > 0 ? (uint8_t) rx[rxPos] : -1;
+    }
+
+    void flush() override {
+        sendPending();
+    }
+
+    void stop() override {
+        if (open) {
+            ask("AT+CIPCLOSE=0", "+CIPCLOSE: 0,", 5000);
+        }
+        open = false;
+        tx.clear();
+        rx.clear();
+        rxPos = 0;
+    }
+
+    uint8_t connected() override {
+        return open || rxPos < rx.size();
+    }
+
+    operator bool() override {
+        return connected();
+    }
+
+private:
+    // Sends cmd and collects the reply until `until` (or ERROR) shows up. A closed connection can be
+    // announced in any reply, so every one is checked for it.
+    String ask(const char* cmd, const char* until, unsigned long waitMs) {
+        Stream& line = smsSerial();
+        drain();
+        line.print(cmd);
+        line.print("\r\n");
+        return collect(until, waitMs);
+    }
+
+    // Clears leftovers before a command, still noticing if the server closed the connection meanwhile.
+    void drain() {
+        Stream& line = smsSerial();
+        String old;
+        while (line.available()) {
+            old += (char) line.read();
+        }
+        if (old.indexOf("+IPCLOSE: 0,") >= 0 || old.indexOf("ATREADY") >= 0) {
+            open = false;
+        }
+#ifdef CELL_DEBUG
+        if (old.length() > 0) {
+            old.replace("\r", "");
+            old.replace("\n", " | ");
+            Serial.printf("[4g] unasked: %s\n", old.substring(0, 160).c_str());
+        }
+#endif
+    }
+
+    String collect(const char* until, unsigned long waitMs) {
+        Stream& line = smsSerial();
+        String out;
+        unsigned long start = millis();
+        while (millis() - start < waitMs) {
+            while (line.available()) {
+                out += (char) line.read();
+            }
+            if (out.indexOf(until) >= 0 || out.indexOf("ERROR") >= 0) {
+                break;
+            }
+            delay(2);
+        }
+        // *ATREADY / "not supported": the modem restarted (a supply dip) and the connection is gone.
+        if (out.indexOf("+IPCLOSE: 0,") >= 0 || out.indexOf("+CIPCLOSE: 0,") >= 0 ||
+            out.indexOf("ATREADY") >= 0 || out.indexOf("operation not supported") >= 0) {
+            open = false;
+        }
+#ifdef CELL_DEBUG
+        String shown = out;
+        shown.replace("\r", "");
+        shown.replace("\n", " | ");
+        Serial.printf("[4g] wanted %s after %lu ms: %s\n", until, millis() - start, shown.substring(0, 160).c_str());
+#endif
+        return out;
+    }
+
+    bool sendPending() {
+        while (!tx.empty() && open) {
+            size_t n = tx.size() < 1024 ? tx.size() : 1024;
+            String cmd = "AT+CIPSEND=0," + String(n);
+            if (ask(cmd.c_str(), ">", 5000).indexOf('>') < 0) {
+                Serial.println("[net] 4G: the modem would not take the request");
+                stop();
+                return false;
+            }
+            smsSerial().write(tx.data(), n);
+            if (collect("+CIPSEND: 0,", 10000).indexOf("+CIPSEND: 0,") < 0) {
+                stop();
+                return false;
+            }
+            tx.erase(tx.begin(), tx.begin() + n);
+        }
+        return true;
+    }
+
+    // Moves whatever the modem has received into rx: "+CIPRXGET: 4,0,<waiting>" says how much,
+    // then "+CIPRXGET: 2,0,<n>,<left>" is followed by exactly n bytes.
+    void fetch() {
+        lastFetchMs = millis();
+        String len = ask("AT+CIPRXGET=4,0", "OK", 2000);
+        int at = len.indexOf("+CIPRXGET: 4,0,");
+        int waiting = at >= 0 ? len.substring(at + 15).toInt() : 0;
+        if (waiting <= 0) {
+            if (rxPos >= rx.size()) {
+                delay(20);   // HttpClient polls in a tight loop; don't flood the modem
+            }
+            return;
+        }
+        if (rxPos > 0) {
+            rx.erase(rx.begin(), rx.begin() + rxPos);
+            rxPos = 0;
+        }
+        while (waiting > 0 && open) {
+            int got = fetchChunk(waiting < 1024 ? waiting : 1024);
+            if (got <= 0) {
+                return;
+            }
+            waiting -= got;
+        }
+    }
+
+    // One AT+CIPRXGET=2 read of up to `want` bytes; returns how many arrived.
+    int fetchChunk(int want) {
+        String cmd = "AT+CIPRXGET=2,0," + String(want);
+        Stream& line = smsSerial();
+        drain();
+        line.print(cmd);
+        line.print("\r\n");
+
+        // Byte by byte: the data follows the header at once, and must not be swallowed with it.
+        String head;
+        unsigned long start = millis();
+        while (millis() - start < 5000 && !head.endsWith("+CIPRXGET: 2,0,")) {
+            int c = line.read();
+            if (c < 0) {
+                delay(1);
+                continue;
+            }
+            head += (char) c;
+            if (head.indexOf("ERROR") >= 0) {
+                return 0;
+            }
+            if (head.length() > 200) {
+                head.remove(0, 100);
+            }
+        }
+        if (!head.endsWith("+CIPRXGET: 2,0,")) {
+            return 0;
+        }
+        String count;
+        start = millis();
+        while (millis() - start < 2000) {
+            int c = line.read();
+            if (c < 0) {
+                continue;
+            }
+            if (c == '\n') {
+                break;
+            }
+            count += (char) c;
+        }
+        int n = count.toInt();
+        int got = 0;
+        start = millis();
+        while (got < n && millis() - start < 5000) {
+            int c = line.read();
+            if (c >= 0) {
+                rx.push_back((uint8_t) c);
+                got++;
+            }
+        }
+        collect("OK", 2000);
+        return got;
+    }
+
+    bool open = false;
+    std::vector<uint8_t> tx;   // TLS records are binary: no String, it stops at a zero byte
+    std::vector<uint8_t> rx;
+    size_t rxPos = 0;
+    unsigned long lastFetchMs = 0;
+};
+
+static CellTcpClient& cellTcp() {
+    static CellTcpClient tcp;
+    return tcp;
+}
+
+// HTTPS over 4G: TLS on the ESP32 over the modem's TCP link. Certificates are not checked, as on WiFi.
+static SSLClient& cellClient() {
+    static SSLClient tls(&cellTcp());
+    static bool ready = false;
+    if (!ready) {
+        tls.setInsecure();
+        tls.setHandshakeTimeout(30);   // seconds: every piece of the handshake is a modem round trip
+        tls.setTimeout(30000);         // milliseconds
+        ready = true;
+    }
+    return tls;
+}
+
+static bool onCell = false;
+static unsigned long lastCellTryMs = 0;
+
+static bool cellEnsureConnected() {
+    unsigned long now = millis();
+    if (onCell) {
+        if (cellModem().isGprsConnected()) {
+            return true;
+        }
+        Serial.println("[net] 4G mobile data dropped");
+        cellClient().stop();
+        onCell = false;
+    }
+
+    // Give the WiFi a while first, so a short dropout at home doesn't start using mobile data.
+    if (disconnectedSinceMs == 0 || now - disconnectedSinceMs < CELL_FALLBACK_MS) {
+        return false;
+    }
+    if (lastCellTryMs != 0 && now - lastCellTryMs < CELL_RETRY_MS) {
+        return false;
+    }
+    lastCellTryMs = now;
+    // Bringing up data blocks the loop; only try once the modem is on the network, when it is quick.
+    if (!smsReady()) {
+        Serial.println("[net] No WiFi, and the A7670G is not on the mobile network yet");
+        return false;
+    }
+
+    Serial.println("[net] No WiFi - starting 4G mobile data");
+    if (!cellModem().gprsConnect(SIM_APN, SIM_APN_USER, SIM_APN_PASS)) {
+        Serial.printf("[net] 4G mobile data failed, trying again in %d s\n", CELL_RETRY_MS / 1000);
+        return false;
+    }
+    secureClient.stop();
+    client.stop();
+    onCell = true;
+    Serial.println("[net] On 4G mobile data until WiFi is back");
+    return true;
+}
+
+bool netOnCellular() {
+    return onCell;
+}
+
+bool netEnsureConnected() {
+    if (netSimulatingOffline()) {
+        return false;
+    }
+    if (wifiEnsureConnected()) {
+        if (onCell) {
+            // WiFi is free and faster: hand back, and close the modem's connection.
+            Serial.println("[net] WiFi is back - 4G mobile data off");
+            cellClient().stop();
+            onCell = false;
+            lastCellTryMs = 0;
+        }
+        return true;
+    }
+    return cellEnsureConnected();
 }
 
 bool netSwitchNetwork() {
@@ -290,6 +712,9 @@ bool netSwitchNetwork() {
 String netNetworkName() {
     if (netSimulatingOffline()) {
         return String();
+    }
+    if (onCell) {
+        return String("4G mobile data");
     }
     return WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String();
 }
@@ -350,6 +775,9 @@ bool netDiscoverPoll(String& host, uint16_t& port) {
 }
 
 Client& netClient(bool secure) {
+    if (onCell) {
+        return cellClient();
+    }
     if (secure) {
         return secureClient;
     }
@@ -416,6 +844,10 @@ bool netSwitchNetwork() {
     return false;
 }
 
+bool netOnCellular() {
+    return true;
+}
+
 String netNetworkName() {
     return modem.isGprsConnected() ? String("cellular") : String();
 }
@@ -425,6 +857,8 @@ bool netDiscoverPoll(String&, uint16_t&) {
 }
 
 void netSimulateOffline(unsigned long) {}
+
+void netSimulateNoWifi(unsigned long) {}
 
 bool netSimulatingOffline() {
     return false;

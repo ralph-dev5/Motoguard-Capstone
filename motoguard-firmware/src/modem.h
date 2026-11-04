@@ -17,9 +17,13 @@ void netSetBackupWifi(const String& ssid, const String& password);
 bool netDiscoverPoll(String& host, uint16_t& port);
 // Name of the network currently in use ("" while offline), to notice a switch between networks.
 String netNetworkName();
+// True while the data goes over mobile data (the 4G fallback, or the cellular-only build).
+bool netOnCellular();
 // Moves to the other saved network (usual WiFi <-> phone hotspot). False when there is no other.
 bool netSwitchNetwork();
 // Test aid: for the next durationMs the board behaves as if it had no connection (WiFi itself is
 // left alone), so offline recording can be shown without switching a router off. 0 ends it.
 void netSimulateOffline(unsigned long durationMs);
+// Test aid: WiFi off for durationMs while mobile data stays allowed, to show the 4G fallback.
+void netSimulateNoWifi(unsigned long durationMs);
 bool netSimulatingOffline();
