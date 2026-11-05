@@ -208,6 +208,11 @@ new #[Title('Motorcycle')] class extends Component {
                 <x-device-status :device="$device" wire:key="presence-{{ $device->id }}" />
                 <x-network-status :device="$device" />
             </div>
+            {{-- The device picks the network by itself; this just says so. --}}
+            <flux:text class="mt-1.5 flex items-start gap-1 text-xs">
+                <flux:icon name="arrows-right-left" variant="micro" class="mt-0.5 shrink-0" />
+                <span>{{ __('Auto: switches to mobile data (A7670G 4G) when home WiFi is out of range') }}</span>
+            </flux:text>
         </div>
         <div class="moto-card p-3">
             <flux:text class="text-xs">{{ __('GPS') }}</flux:text>
