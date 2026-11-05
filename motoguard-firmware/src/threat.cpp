@@ -37,6 +37,7 @@ static uint16_t knocks = 0;
 static uint16_t jolts = 0;
 static float maxTiltDeg = 0;
 static bool sawContinuous = false;
+static bool sawSteepTilt = false;         // lifted or tipped past THREAT_THEFT_TILT_DEG and held
 static unsigned long lastTheftReportMs = 0;
 static unsigned long lastAlarmBeepMs = 0;
 
@@ -63,6 +64,7 @@ static void endEpisode() {
     hits = knocks = jolts = 0;
     maxTiltDeg = 0;
     sawContinuous = false;
+    sawSteepTilt = false;
 }
 
 static void queueReport(unsigned long now) {
@@ -89,7 +91,8 @@ static void soundAlarm(unsigned long now) {
 }
 
 static ThreatLevel classify() {
-    if (sawContinuous) {
+    // Pushed or carried for seconds, or lifted/tipped well past how it was parked.
+    if (sawContinuous || sawSteepTilt) {
         return ThreatLevel::TheftAttempt;
     }
     if (hits >= THREAT_SUSPICIOUS_HITS) {
@@ -108,8 +111,12 @@ void threatSetArmed(bool on) {
 
 void threatOnSample(const MotionSample& sample) {
     unsigned long now = millis();
-    bool touched = sample.knock || sample.jolt;
-    bool active = touched || sample.handled;
+    // A smooth lift or tilt makes no tap and little jitter, so a held tilt counts too: past
+    // MOTION_TILT_THRESHOLD_DEG it is a hit, past THREAT_THEFT_TILT_DEG a theft attempt. Being
+    // pushed or rolled (moving) keeps a run going like handling does.
+    bool steep = sample.steepTilt;
+    bool touched = sample.knock || sample.jolt || sample.tilted || steep;
+    bool active = touched || sample.handled || sample.moving;
 
 #if MOTION_TRACE
     // Tuning aid, armed or not: the signals the rules use, ten times a second while anything is
@@ -161,7 +168,7 @@ void threatOnSample(const MotionSample& sample) {
         lastHitMs = now;
     }
 
-    if (!counted && !continuous) {
+    if (!counted && !continuous && !steep) {
         if (level == ThreatLevel::TheftAttempt && active) {
             soundAlarm(now);
         }
@@ -191,6 +198,8 @@ void threatOnSample(const MotionSample& sample) {
         knocks += sample.knock;
         jolts += sample.jolt;
     }
+    bool steepStarted = steep && !sawSteepTilt;
+    sawSteepTilt = sawSteepTilt || steep;
     bool continuousStarted = continuous && !sawContinuous;
     sawContinuous = sawContinuous || continuous;
     maxTiltDeg = max(maxTiltDeg, sample.tiltDeg);
@@ -202,10 +211,10 @@ void threatOnSample(const MotionSample& sample) {
     }
 
     // Log only what changed something, or continuous handling would print 20 lines a second.
-    if (counted || continuousStarted || level != before) {
-        Serial.printf("[threat] %s%s-> %s (tap #%u, jitter %.2f, tilt %.1f deg)\n",
+    if (counted || continuousStarted || steepStarted || level != before) {
+        Serial.printf("[threat] %s%s%s-> %s (tap #%u, jitter %.2f, tilt %.1f deg)\n",
                       counted ? "tap " : "", continuousStarted ? "CONTINUOUS " : "",
-                      levelName(level), hits, (double) sample.jitter, (double) sample.tiltDeg);
+                      steepStarted ? "LIFTED/TIPPED " : "", levelName(level), hits, (double) sample.jitter, (double) sample.tiltDeg);
     }
 
     if (level == ThreatLevel::Suspicious && before < ThreatLevel::Suspicious) {
