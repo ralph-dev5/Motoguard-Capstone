@@ -400,6 +400,11 @@ new #[Title('Motorcycle')] class extends Component {
                     <flux:heading class="flex items-center gap-2"><flux:icon name="bell-alert" variant="mini" class="size-5 text-zinc-400" />{{ __('Latest alerts') }}</flux:heading>
                     <flux:link :href="route('alerts.index', ['device' => $device->id])" wire:navigate class="text-sm">{{ __('See all') }}</flux:link>
                 </div>
+                {{-- Matches the firmware: only a theft attempt texts the owner (raiseAlert's textOwner). --}}
+                <flux:text class="flex items-start gap-1.5 text-sm">
+                    <flux:icon name="chat-bubble-left-ellipsis" variant="micro" class="mt-0.5 shrink-0" />
+                    <span>{{ __('A Theft attempt automatically sends a text to your phone, at most one every 2 minutes. Minor and Suspicious alerts are only shown here.') }}</span>
+                </flux:text>
                 <ul class="moto-card divide-y divide-zinc-200 overflow-hidden md:hidden dark:divide-zinc-700">
                     @forelse ($this->alerts as $alert)
                         <x-alert-card :alert="$alert" wire:key="alert-card-{{ $alert->id }}" />
@@ -537,7 +542,7 @@ new #[Title('Motorcycle')] class extends Component {
             <form wire:submit="saveDetails" class="space-y-4 moto-card p-4 lg:col-span-2 xl:col-span-1">
                 <flux:heading class="flex items-center gap-2"><flux:icon name="identification" variant="mini" class="size-5 text-zinc-400" />{{ __('Details') }}</flux:heading>
                 <flux:input wire:model="plate_number" :label="__('Plate number')" />
-                <flux:input wire:model="owner_phone" :label="__('Phone number for text alerts')" placeholder="09171234567" />
+                <flux:input wire:model="owner_phone" :label="__('Phone number for text alerts')" :description="__('Gets a text automatically when a Theft attempt is detected.')" placeholder="09171234567" />
                 {{-- No app: the phone pairs once in its own Bluetooth settings and reconnects by itself when near. --}}
                 <div class="space-y-1 border-t border-zinc-200 pt-4 dark:border-zinc-700">
                     <flux:heading size="sm">{{ __('Pair your phone (optional)') }}</flux:heading>
