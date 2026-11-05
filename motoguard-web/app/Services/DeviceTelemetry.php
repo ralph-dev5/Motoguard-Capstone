@@ -69,8 +69,6 @@ class DeviceTelemetry
             // The owner's phone hotspot, which the device falls back to away from its usual WiFi.
             'backup_wifi' => $device->hotspot_ssid ? ['ssid' => $device->hotspot_ssid, 'password' => (string) $device->hotspot_password] : null,
             'safe_zone' => $device->safeZonePayload(),
-            // auto | wifi | cellular, chosen on the device page.
-            'network_mode' => $device->network_mode ?? 'auto',
             'server_time' => now()->toIso8601String(),
         ];
     }
@@ -186,19 +184,6 @@ class DeviceTelemetry
 
             DeviceStatusChanged::dispatch($device);
         }
-    }
-
-    /**
-     * The owner's choice of network. The device picks it up from the heartbeat reply, fetched on
-     * its next ping.
-     */
-    public function setNetworkMode(Device $device, string $mode): void
-    {
-        $device->network_mode = $mode;
-        $device->save();
-
-        DevicePresence::requestSync($device->id);
-        DeviceStatusChanged::dispatch($device);
     }
 
     public function setArmed(Device $device, bool $armed): void

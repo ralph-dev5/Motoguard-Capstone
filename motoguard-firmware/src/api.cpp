@@ -169,7 +169,6 @@ HeartbeatResult apiHeartbeat(const char* state, float batteryVolts, const GpsFix
         result.ok = true;
         result.armed = response["armed"] | true;
         result.calibrate = response["calibrate"] | false;
-        result.networkMode = response["network_mode"] | "";
         // Present in every reply: an object when a hotspot is set, null when the owner removed it.
         if (response["backup_wifi"].is<JsonObject>()) {
             result.hasBackupWifi = true;

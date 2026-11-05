@@ -415,20 +415,3 @@ test('the device page shows how the device is connected', function () {
     $device->update(['network_name' => 'Home_2.4GHz']);
     $this->actingAs($user)->get(route('devices.show', $device))->assertSee('Home WiFi')->assertSee('Home_2.4GHz');
 });
-
-test('the owner can choose the network and the heartbeat hands it to the device', function () {
-    $user = User::factory()->create();
-    $device = Device::factory()->for($user)->create();
-
-    expect($device->fresh()->network_mode)->toBe('auto');
-
-    Livewire\Livewire::actingAs($user)
-        ->test('pages::devices.show', ['device' => $device])
-        ->call('setNetworkMode', 'cellular')
-        ->call('setNetworkMode', 'bogus');
-
-    expect($device->fresh()->network_mode)->toBe('cellular');
-
-    Sanctum::actingAs($device->fresh(), [Device::TOKEN_ABILITY]);
-    $this->postJson(route('api.device.heartbeat'))->assertOk()->assertJson(['network_mode' => 'cellular']);
-});

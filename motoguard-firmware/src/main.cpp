@@ -772,9 +772,6 @@ void loop() {
                 applyOwnerPhone(heartbeat.ownerPhone);
             }
             applyArmed(heartbeat.armed);
-            if (heartbeat.networkMode.length() > 0) {
-                netSetMode(heartbeat.networkMode);
-            }
             if (heartbeat.calibrate && motionReady && !calibrationActive() && !calibrationUnsent) {
                 calibrationStart();
             }
