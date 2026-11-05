@@ -39,18 +39,40 @@ static unsigned long disconnectedSinceMs = 0;
 static unsigned long offlineUntilMs = 0;   // see netSimulateOffline
 static unsigned long lastSwitchMs = 0;
 
-static void loadNetworks() {
-    wifi_config_t conf;
-    if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK && conf.sta.ssid[0] != 0) {
-        primarySsid = String(reinterpret_cast<const char*>(conf.sta.ssid));
-        primaryPass = String(reinterpret_cast<const char*>(conf.sta.password));
-    }
+static String looseName(const String& ssid);
 
+// The usual network is kept in its own preferences entry. The WiFi driver's stored network is
+// not reliable for it: the setup library re-saves whatever network was joined last, which once
+// turned the phone hotspot into the "usual" network and lost the home WiFi.
+static void savePrimary(const String& ssid, const String& pass) {
+    if (ssid.length() == 0 || (backupSsid.length() > 0 && looseName(ssid) == looseName(backupSsid))) {
+        return;
+    }
+    primarySsid = ssid;
+    primaryPass = pass;
+    Preferences prefs;
+    prefs.begin("net", false);
+    prefs.putString("priSsid", ssid);
+    prefs.putString("priPass", pass);
+    prefs.end();
+}
+
+static void loadNetworks() {
     Preferences prefs;
     prefs.begin("net", true);
     backupSsid = prefs.getString("bkSsid", "");
     backupPass = prefs.getString("bkPass", "");
+    primarySsid = prefs.getString("priSsid", "");
+    primaryPass = prefs.getString("priPass", "");
     prefs.end();
+
+    // First start with this firmware: take the network the setup page saved in the driver,
+    // unless that is the phone hotspot.
+    wifi_config_t conf;
+    if (primarySsid.length() == 0 && esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK && conf.sta.ssid[0] != 0) {
+        savePrimary(String(reinterpret_cast<const char*>(conf.sta.ssid)),
+                    String(reinterpret_cast<const char*>(conf.sta.password)));
+    }
 }
 
 // Network names as typed on a PC rarely match a phone's exactly: an iPhone calls itself
@@ -194,6 +216,10 @@ void netBegin() {
 
     loadNetworks();
     bool button = setupButtonPressed();
+    if (button) {
+        // Opened on purpose with the button: leave time to pick the network and type its password.
+        wm.setConfigPortalTimeout(300);
+    }
     bool connected = false;
 
     // Usual WiFi first, then the owner's phone hotspot, and only then the setup page: an owner
@@ -211,8 +237,7 @@ void netBegin() {
             ? wm.startConfigPortal(SETUP_AP_NAME, SETUP_AP_PASS)
             : wm.autoConnect(SETUP_AP_NAME, SETUP_AP_PASS);
         if (connected && !onBackup) {
-            primarySsid = WiFi.SSID();
-            primaryPass = WiFi.psk();
+            savePrimary(WiFi.SSID(), WiFi.psk());   // ignored when it is the phone hotspot
         }
     }
 
@@ -683,10 +708,16 @@ bool netOnCellular() {
 #define NET_MODE_GIVE_UP_MS 180000UL
 static unsigned long lastNetOkMs = 0;
 
+// Set when a choice was given up; the same choice from the dashboard is ignored until then.
+static unsigned long modeHoldUntilMs = 0;
+
 void netSetMode(const String& mode) {
     String wanted = (mode == "wifi" || mode == "cellular") ? mode : String("auto");
     if (wanted == netMode) {
         return;
+    }
+    if (wanted != "auto" && modeHoldUntilMs != 0 && (long) (millis() - modeHoldUntilMs) < 0) {
+        return;   // just gave this up: stay automatic for a while before trying again
     }
     Serial.printf("[net] Network chosen on the dashboard: %s\n",
                   wanted == "wifi" ? "home WiFi only" : wanted == "cellular" ? "mobile data only" : "automatic");
@@ -742,6 +773,7 @@ bool netEnsureConnected() {
             Serial.printf("[net] %s has not connected for %lu min - back to automatic\n",
                           netMode == "wifi" ? "Home WiFi" : "Mobile data", NET_MODE_GIVE_UP_MS / 60000UL);
             netSetMode("auto");
+            modeHoldUntilMs = now + 600000UL;   // 10 min before the dashboard's choice applies again
         }
         return ok;
     }

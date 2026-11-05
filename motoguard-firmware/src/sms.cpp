@@ -39,6 +39,41 @@ static String ask(const char* cmd, unsigned long waitMs = 1500) {
     return out;
 }
 
+// The modem line runs at SMS_MODEM_BAUD (115200, the A7670G's default). A slower speed set with
+// AT+IPR was tried and abandoned: the modem kept it across some restarts but not others, and the
+// two ends drifted apart. If the modem answers at another speed, it is moved back.
+#define MODEM_LINK_BAUD SMS_MODEM_BAUD
+
+static bool modemAnswersAt(unsigned long baud) {
+    sim.updateBaudRate(baud);
+    delay(50);
+    for (int i = 0; i < 4; i++) {
+        if (ask("AT", 400).indexOf("OK") >= 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Not answering at MODEM_LINK_BAUD: look for the modem at the other speeds it may be set to, and
+// move it back. True when it answers at MODEM_LINK_BAUD afterwards.
+static bool relinkModem() {
+    static const unsigned long others[] = {57600, 9600, 38400, 19200};
+    for (unsigned long baud : others) {
+        if (baud == MODEM_LINK_BAUD || !modemAnswersAt(baud)) {
+            continue;
+        }
+        sim.println("AT+IPR=" + String(MODEM_LINK_BAUD));
+        sim.flush();
+        delay(200);
+        if (modemAnswersAt(MODEM_LINK_BAUD)) {
+            Serial.printf("[sms] A7670G was at %lu baud - moved back to %d\n", baud, MODEM_LINK_BAUD);
+            return true;
+        }
+    }
+    return modemAnswersAt(MODEM_LINK_BAUD);
+}
+
 static void refresh(bool verbose) {
     bool wasAnswering = answering, wasReady = simReady, wasRegistered = registered;
 
@@ -49,6 +84,15 @@ static void refresh(bool verbose) {
     bool restarted = answering && hello.indexOf("AT\r") >= 0;
     if (restarted && wasAnswering) {
         Serial.println("[sms] A7670G restarted - setting it up again");
+    }
+    if (!answering) {
+        // A modem that restarted is back at its factory 115200: move it to the slow line again.
+        if (relinkModem()) {
+            answering = true;
+            ask("ATE0");
+            ask("AT+CMGF=1");
+            ask("AT+CMEE=2");
+        }
     }
     if (!answering) {
         simReady = registered = false;
@@ -94,12 +138,10 @@ static void refresh(bool verbose) {
 }
 
 void smsBegin() {
-    sim.begin(SMS_MODEM_BAUD, SERIAL_8N1, PIN_MODEM_RX, PIN_MODEM_TX);
+    sim.begin(MODEM_LINK_BAUD, SERIAL_8N1, PIN_MODEM_RX, PIN_MODEM_TX);
     delay(300);
-    // The first "AT"s wake the modem's serial port.
-    for (int i = 0; i < 4; i++) {
-        sim.println("AT");
-        delay(120);
+    if (!modemAnswersAt(MODEM_LINK_BAUD)) {
+        relinkModem();   // left at another speed by an earlier firmware
     }
     refresh(true);
     lastRefreshMs = millis();
