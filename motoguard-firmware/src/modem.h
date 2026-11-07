@@ -27,3 +27,5 @@ void netSimulateOffline(unsigned long durationMs);
 // Test aid: WiFi off for durationMs while mobile data stays allowed, to show the 4G fallback.
 void netSimulateNoWifi(unsigned long durationMs);
 bool netSimulatingOffline();
+// Opens the WiFi setup page ("MotoGuard-Setup") for up to 5 minutes, blocking, to save a network.
+void netOpenSetupPortal();

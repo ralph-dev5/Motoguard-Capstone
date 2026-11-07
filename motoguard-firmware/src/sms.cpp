@@ -1,3 +1,4 @@
+#include "breadcrumb.h"
 #include "sms.h"
 
 #include "config.h"
@@ -75,6 +76,7 @@ static bool relinkModem() {
 }
 
 static void refresh(bool verbose) {
+    breadcrumb("sms: refresh");
     bool wasAnswering = answering, wasReady = simReady, wasRegistered = registered;
 
     String hello = ask("AT", 800);
@@ -108,6 +110,9 @@ static void refresh(bool verbose) {
         ask("ATE0");        // no echo, so replies are easy to read
         ask("AT+CMGF=1");   // text mode
         ask("AT+CMEE=2");   // errors in words, so a failed text says why
+        // LTE only: on 2G/3G (a fallback, or a call or balance check) the modem draws ~2 A bursts
+        // that a breadboard supply can't hold, and it restarts. LTE peaks at about half that.
+        ask("AT+CNMP=38");
     }
 
     simReady = ask("AT+CPIN?").indexOf("READY") >= 0;
@@ -216,6 +221,7 @@ void smsDiagnose() {
 }
 
 bool smsSend(const String& number, const String& message) {
+    breadcrumb("sms: send");
     // The status may be up to half a minute old; an alert is worth a fresh look.
     if (!smsReady()) {
         refresh(false);

@@ -1,3 +1,4 @@
+#include "breadcrumb.h"
 #include "api.h"
 
 #include <ArduinoHttpClient.h>
@@ -49,6 +50,7 @@ static int request(const char* path, const String& payload, unsigned long timeou
         }
     }
     http.setHttpResponseTimeout(timeoutMs);
+    breadcrumb(path);   // request sent
     http.beginRequest();
     http.post(path);
     if (payload.length() > 0) {
@@ -65,9 +67,11 @@ static int request(const char* path, const String& payload, unsigned long timeou
     }
     http.endRequest();
 
+    breadcrumb("http: waiting for status");
     int status = http.responseStatusCode();
     // Always read the whole reply: on a kept-open connection leftovers would be taken for the
     // start of the next response.
+    breadcrumb("http: reading body");
     text = status > 0 ? http.responseBody() : String();
     if (!tls || status <= 0) {
         http.stop();

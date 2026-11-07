@@ -1,6 +1,15 @@
 #include <Arduino.h>
 #include <Preferences.h>
+#include <esp_task_wdt.h>
+#include <Ticker.h>
 
+// The longest the loop may be stuck before the board restarts itself (see setup).
+#define LOOP_WATCHDOG_S 120
+
+static Ticker setupButtonTicker;
+static void watchSetupButton();
+
+#include "breadcrumb.h"
 #include "api.h"
 #include "buzzer.h"
 #include "calibration.h"
@@ -379,8 +388,18 @@ void setup() {
     settingsBegin();
     outboxBegin();
     ownerPhone = prefs.getString("ownerPhone", "");
+    breadcrumbReport();
     smsBegin();
     netBegin();
+
+    // Safety net: a request that never finishes (seen once over 4G) would leave the device silent
+    // for good. If the loop doesn't come round for 2 minutes the board restarts, and the panic
+    // log names the function it was stuck in. Started after netBegin, whose setup page may wait
+    // longer than that on purpose.
+    pinMode(PIN_SETUP_BUTTON, INPUT_PULLUP);
+    setupButtonTicker.attach_ms(50, watchSetupButton);
+    esp_task_wdt_init(LOOP_WATCHDOG_S, true);
+    esp_task_wdt_add(nullptr);
 
     ownerBegin();
     prefs.remove("ownerKey");   // the beacon ID of the older app-based detection, no longer used
@@ -631,7 +650,40 @@ static void serviceSerialCommands() {
     }
 }
 
+// BOOT held for 3 s while running opens the WiFi setup page, e.g. to join the WiFi at another
+// house. (At power-on the button can't be used: held during reset it starts the flasher.) The
+// button is watched from a timer, because loop() can be busy for many seconds with a request over
+// 4G; the beep confirms at once and the page opens when loop() comes round.
+static volatile bool setupPortalRequested = false;
+
+static void watchSetupButton() {
+    static int heldTicks = 0;   // 50 ms each
+    if (digitalRead(PIN_SETUP_BUTTON) != LOW) {
+        heldTicks = 0;
+        return;
+    }
+    if (++heldTicks == 60) {
+        buzzerBeep(2);
+        setupPortalRequested = true;
+    }
+}
+
+static void serviceSetupButton() {
+    if (!setupPortalRequested) {
+        return;
+    }
+    setupPortalRequested = false;
+    // The page waits for the owner for up to 5 min, longer than the loop watchdog allows.
+    esp_task_wdt_delete(nullptr);
+    netOpenSetupPortal();
+    esp_task_wdt_add(nullptr);
+    lastHeartbeatMs = 0;   // report in at once on the new network
+}
+
 void loop() {
+    esp_task_wdt_reset();
+    breadcrumb("loop");
+    serviceSetupButton();
     unsigned long now = millis();
     serviceSerialCommands();
     serviceCalibration(now);

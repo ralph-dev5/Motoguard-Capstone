@@ -74,6 +74,9 @@ class Device extends Model implements AuthenticatableContract
      */
     public const OFFLINE_AFTER_SECONDS = 75;
 
+    /** Presence window while the device is on mobile data (see presenceSignal). */
+    public const CELLULAR_OFFLINE_AFTER_SECONDS = 60;
+
     /**
      * The owner's phone was heard over Bluetooth by a device that is still reporting in. A device
      * that went silent keeps its last flag in the column, so presence gates it.
@@ -252,7 +255,13 @@ class Device extends Model implements AuthenticatableContract
         $ping = DevicePresence::lastPingAt($this->id);
 
         if ($ping !== null) {
-            return [$ping, DevicePresence::offlineAfterSeconds()];
+            // On the A7670G's 4G data a check-in can take several seconds and the odd one is
+            // retried, so the tight WiFi window would flip the badge off and on for nothing.
+            $window = $this->network === 'cellular'
+                ? max(DevicePresence::offlineAfterSeconds(), self::CELLULAR_OFFLINE_AFTER_SECONDS)
+                : DevicePresence::offlineAfterSeconds();
+
+            return [$ping, $window];
         }
 
         return [$this->last_seen_at?->getTimestamp(), self::OFFLINE_AFTER_SECONDS];

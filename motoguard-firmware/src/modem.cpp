@@ -1,3 +1,4 @@
+#include "breadcrumb.h"
 #include "modem.h"
 
 #include "config.h"
@@ -169,6 +170,27 @@ static bool joinNetwork(const String& wanted, const String& pass, unsigned long 
 }
 
 
+void netOpenSetupPortal() {
+    // Opened on purpose (BOOT held): the owner picks a network on their phone. Saved as the usual
+    // network; the phone hotspot set on the dashboard is left as it is.
+    WiFiManager wm;
+    wm.setConfigPortalTimeout(300);
+    Serial.printf("[net] Setup portal open for 5 min: join WiFi \"%s\" (password \"%s\") and open http://192.168.4.1\n",
+                  SETUP_AP_NAME, SETUP_AP_PASS);
+    stopJoining();
+    bool connected = wm.startConfigPortal(SETUP_AP_NAME, SETUP_AP_PASS);
+    if (connected) {
+        savePrimary(WiFi.SSID(), WiFi.psk());
+        onBackup = false;
+        disconnectedSinceMs = 0;
+        Serial.println("[net] WiFi saved and connected: " + WiFi.SSID());
+    } else {
+        Serial.println("[net] Setup portal closed without a new network");
+        WiFi.mode(WIFI_STA);
+        WiFi.reconnect();
+    }
+}
+
 static bool setupButtonPressed() {
     // GPIO0 is the BOOT button. Holding it during reset enters the flasher, so it is read after boot instead.
     pinMode(PIN_SETUP_BUTTON, INPUT_PULLUP);
@@ -282,6 +304,7 @@ void netSimulateNoWifi(unsigned long durationMs) {
 }
 
 static bool wifiEnsureConnected() {
+    breadcrumb("wifi: ensure");
     unsigned long now = millis();
     if (noWifiUntilMs != 0) {
         if ((long) (now - noWifiUntilMs) < 0) {
@@ -325,6 +348,9 @@ static bool wifiEnsureConnected() {
 // with Google, so the ESP32 does TLS on top of this (SSLClient, below). TinyGSM's client can't be
 // used either: before opening it sends AT+CTCPKA, which the A7670G rejects, and then gives up.
 // (The CCH service is no good for plain TCP here: it opens, then refuses to send.)
+// How long a 4G connection may stay silent after sending before it is given up.
+#define CELL_REPLY_TIMEOUT_MS 45000
+
 // Connections in a row that sent a request but got nothing back; see cellEnsureConnected().
 static int cellSilentConnections = 0;
 
@@ -335,6 +361,7 @@ public:
     }
 
     int connect(const char* host, uint16_t port) override {
+        breadcrumb("4g: tcp connect");
         stop();
         ask("AT+CIPCLOSE=0", "+CIPCLOSE: 0,", 3000);   // left open by a previous session
         // "Received data waits until asked for" only takes effect while the data service is closed;
@@ -350,6 +377,7 @@ public:
         String cmd = String("AT+CIPOPEN=0,\"TCP\",\"") + host + "\"," + port;
         String reply = ask(cmd.c_str(), "+CIPOPEN: 0,", 30000);
         open = reply.indexOf("+CIPOPEN: 0,0") >= 0;
+        replyDeadlineMs = millis() + CELL_REPLY_TIMEOUT_MS;
         if (!open) {
             Serial.printf("[net] 4G: could not open %s:%u\n", host, port);
         }
@@ -495,6 +523,7 @@ private:
     }
 
     bool sendPending() {
+        breadcrumb("4g: send");
         while (!tx.empty() && open) {
             size_t n = tx.size() < 1024 ? tx.size() : 1024;
             String cmd = "AT+CIPSEND=0," + String(n);
@@ -513,6 +542,7 @@ private:
             }
             tx.erase(tx.begin(), tx.begin() + n);
             sentBytes += n;
+            replyDeadlineMs = millis() + CELL_REPLY_TIMEOUT_MS;
         }
         return true;
     }
@@ -520,6 +550,14 @@ private:
     // Moves whatever the modem has received into rx: "+CIPRXGET: 4,0,<waiting>" says how much,
     // then "+CIPRXGET: 2,0,<n>,<left>" is followed by exactly n bytes.
     void fetch() {
+        breadcrumb("4g: fetch");
+        // Nothing back for too long: close it, so whoever is waiting on a reply gives up instead
+        // of asking the modem forever (seen as a loop stuck here until the watchdog fired).
+        if (open && replyDeadlineMs != 0 && (long) (millis() - replyDeadlineMs) > 0) {
+            Serial.printf("[4g] no reply for %d s - closing the connection\n", CELL_REPLY_TIMEOUT_MS / 1000);
+            stop();
+            return;
+        }
         lastFetchMs = millis();
         String len = ask("AT+CIPRXGET=4,0", "OK", 2000);
         int at = len.indexOf("+CIPRXGET: 4,0,");
@@ -592,6 +630,7 @@ private:
                 rx.push_back((uint8_t) c);
                 got++;
                 gotBytes++;
+                replyDeadlineMs = millis() + CELL_REPLY_TIMEOUT_MS;
             }
         }
         collect("OK", 2000);
@@ -605,6 +644,7 @@ private:
     unsigned long lastFetchMs = 0;
     unsigned sentBytes = 0;
     unsigned gotBytes = 0;
+    unsigned long replyDeadlineMs = 0;   // see fetch()
 };
 
 static CellTcpClient& cellTcp() {
@@ -645,6 +685,7 @@ static bool cellDataUp() {
 }
 
 static bool cellEnsureConnected() {
+    breadcrumb("4g: ensure data");
     unsigned long now = millis();
     if (onCell) {
         // Checked at most every 10 s: every request comes through here.
@@ -876,6 +917,9 @@ void netSetBackupWifi(const String&, const String&) {}
 bool netSwitchNetwork() {
     return false;
 }
+
+// The mobile-data build has no WiFi to set up.
+void netOpenSetupPortal() {}
 
 bool netOnCellular() {
     return true;

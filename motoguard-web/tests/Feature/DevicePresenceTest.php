@@ -88,3 +88,13 @@ test('a ping reports whether the device is on WiFi or the A7670G mobile data', f
     $this->postJson(route('api.device.ping', ['net' => 'bogus']), [], ['Authorization' => $token])->assertOk();
     expect($device->fresh()->network)->toBe('cellular');
 });
+
+test('a device on mobile data gets a wider presence window', function () {
+    $device = Device::factory()->create(['network' => 'cellular']);
+    DevicePresence::touch($device->id);
+
+    expect($device->presenceSignal()[1])->toBe(Device::CELLULAR_OFFLINE_AFTER_SECONDS);
+
+    $device->network = 'wifi';
+    expect($device->presenceSignal()[1])->toBe(DevicePresence::offlineAfterSeconds());
+});
