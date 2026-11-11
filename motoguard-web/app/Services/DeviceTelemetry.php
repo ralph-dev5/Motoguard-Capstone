@@ -8,7 +8,6 @@ use App\Enums\DeviceStatus;
 use App\Events\AlertTriggered;
 use App\Events\DeviceLocationUpdated;
 use App\Events\DeviceStatusChanged;
-use App\Jobs\SendAlertSms;
 use App\Models\Alert;
 use App\Models\Device;
 use App\Models\LocationLog;
@@ -112,7 +111,7 @@ class DeviceTelemetry
     {
         // $occurredAt is set for an alert the device recorded with no connection and delivers now.
         // It is filed under the time it happened, and when that was a while ago it is history, not
-        // news: it must not move the motorcycle's pin back or text the owner about an old event.
+        // news: it must not move the motorcycle's pin back to where an old event happened.
         $recordedOffline = $occurredAt !== null;
         $stale = $recordedOffline && $occurredAt->lt(now()->subMinutes(5));
 
@@ -150,12 +149,9 @@ class DeviceTelemetry
             return $alert;
         }
 
+        // Texts go out from the device itself, through the A7670G's SIM; the server sends none.
         AlertTriggered::dispatch($alert);
         DeviceStatusChanged::dispatch($device);
-
-        if (! $smsSent && ! $stale && $device->owner_phone && ($level?->notifiesOwner() ?? true)) {
-            SendAlertSms::dispatch($alert);
-        }
 
         return $alert;
     }

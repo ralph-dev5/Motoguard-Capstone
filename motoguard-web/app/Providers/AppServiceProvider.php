@@ -3,9 +3,6 @@
 namespace App\Providers;
 
 use App\Broadcasting\ResilientPusherBroadcaster;
-use App\Contracts\SmsGateway;
-use App\Services\Sms\LogSmsGateway;
-use App\Services\Sms\SemaphoreSmsGateway;
 use Carbon\CarbonImmutable;
 use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Database\Events\MigrationsEnded;
@@ -23,13 +20,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->bind(SmsGateway::class, fn () => match (config('services.sms.driver')) {
-            'semaphore' => new SemaphoreSmsGateway(
-                (string) config('services.semaphore.key'),
-                config('services.semaphore.sender_name'),
-            ),
-            default => new LogSmsGateway,
-        });
+        //
     }
 
     /**

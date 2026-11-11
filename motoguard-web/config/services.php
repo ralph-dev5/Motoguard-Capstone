@@ -28,15 +28,6 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
-    'sms' => [
-        'driver' => env('SMS_DRIVER', 'log'),
-    ],
-
-    'semaphore' => [
-        'key' => env('SEMAPHORE_API_KEY'),
-        'sender_name' => env('SEMAPHORE_SENDER_NAME'),
-    ],
-
     // Shared with the firmware (DEVICE_ENROLL_SECRET in include/config.h). A board signs its ID
     // with it to prove it is a real MotoGuard+ unit before it is handed a token.
     'device' => [

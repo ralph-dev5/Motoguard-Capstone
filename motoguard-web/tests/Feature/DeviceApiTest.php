@@ -4,7 +4,6 @@ use App\Enums\AlertLevel;
 use App\Enums\AlertType;
 use App\Enums\DeviceStatus;
 use App\Events\AlertTriggered;
-use App\Jobs\SendAlertSms;
 use App\Models\Device;
 use App\Models\User;
 use App\Services\DeviceTelemetry;
@@ -78,18 +77,18 @@ test('device alerts are stored and broadcast', function () {
         ->and($alert->payload)->toBe(['accel_delta' => 3.1]);
 
     Event::assertDispatched(AlertTriggered::class);
-    Bus::assertNotDispatched(SendAlertSms::class);
 });
 
-test('the server sends a backup SMS when the device could not', function () {
+test('the server never texts: a text the device could not send stays not sent', function () {
     Bus::fake();
 
-    $device = Device::factory()->create();
+    $device = Device::factory()->create(['owner_phone' => '+639171234567']);
     Sanctum::actingAs($device, [Device::TOKEN_ABILITY]);
 
     $this->postJson(route('api.device.alerts'), ['type' => 'tilt', 'sms_sent' => false])->assertCreated();
 
-    Bus::assertDispatched(SendAlertSms::class);
+    expect($device->alerts()->sole()->sms_sent)->toBeFalse();
+    Bus::assertNothingDispatched();
 });
 
 test('a minor episode is recorded without alarming anyone', function () {
@@ -109,7 +108,6 @@ test('a minor episode is recorded without alarming anyone', function () {
         ->and($device->refresh()->status)->toBe(DeviceStatus::Online);
 
     Event::assertNotDispatched(AlertTriggered::class);
-    Bus::assertNotDispatched(SendAlertSms::class);
 });
 
 test('a suspicious episode alerts the dashboard but does not text the owner', function () {
@@ -126,21 +124,18 @@ test('a suspicious episode alerts the dashboard but does not text the owner', fu
         ->and($device->refresh()->status)->toBe(DeviceStatus::Alert);
 
     Event::assertDispatched(AlertTriggered::class);
-    Bus::assertNotDispatched(SendAlertSms::class);
 });
 
-test('a theft attempt texts the owner when the device could not', function () {
-    Bus::fake();
-
+test('a theft attempt the device texted is recorded as sent', function () {
     $device = Device::factory()->create();
     Sanctum::actingAs($device, [Device::TOKEN_ABILITY]);
 
-    $this->postJson(route('api.device.alerts'), ['type' => 'movement', 'level' => 'theft_attempt', 'sms_sent' => false])
+    $this->postJson(route('api.device.alerts'), ['type' => 'movement', 'level' => 'theft_attempt', 'sms_sent' => true])
         ->assertCreated();
 
-    expect($device->alerts()->sole()->level)->toBe(AlertLevel::TheftAttempt);
-
-    Bus::assertDispatched(SendAlertSms::class);
+    expect($device->alerts()->sole())
+        ->level->toBe(AlertLevel::TheftAttempt)
+        ->sms_sent->toBeTrue();
 });
 
 test('an unknown alert level is rejected', function () {
@@ -175,8 +170,6 @@ test('leaving the parking zone while armed raises exactly one geofence alert', f
     expect($alerts)->toHaveCount(1)
         ->and($alerts->first()->payload['distance_m'])->toBeGreaterThan(1000)
         ->and($device->locationLogs()->count())->toBe(2);
-
-    Bus::assertDispatched(SendAlertSms::class);
 });
 
 test('moving while disarmed does not raise a geofence alert', function () {

@@ -58,7 +58,5 @@ services:
         value: "8080"
       - key: REVERB_SCHEME
         value: http
-      - key: SMS_DRIVER
-        value: log
       - key: PRESENCE_OFFLINE_AFTER
         value: "20"
