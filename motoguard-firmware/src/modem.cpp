@@ -351,6 +351,10 @@ static bool wifiEnsureConnected() {
 // How long a 4G connection may stay silent after sending before it is given up.
 #define CELL_REPLY_TIMEOUT_MS 45000
 
+// The modem's socket service was opened by us with "received data waits until asked for".
+// Cleared when the data link is refreshed (cellDataUp closes the service).
+static bool cellServiceReady = false;
+
 // Connections in a row that sent a request but got nothing back; see cellEnsureConnected().
 static int cellSilentConnections = 0;
 
@@ -364,15 +368,20 @@ public:
         breadcrumb("4g: tcp connect");
         stop();
         ask("AT+CIPCLOSE=0", "+CIPCLOSE: 0,", 3000);   // left open by a previous session
-        // "Received data waits until asked for" only takes effect while the data service is closed;
-        // otherwise replies are pushed out unasked and lost. So close it, set that, and reopen.
-        if (ask("AT+NETOPEN?", "OK", 2000).indexOf("+NETOPEN: 1") >= 0) {
-            ask("AT+NETCLOSE", "+NETCLOSE:", 10000);
-        }
-        ask("AT+CIPRXGET=1", "OK", 2000);
-        if (ask("AT+NETOPEN", "+NETOPEN:", 15000).indexOf("+NETOPEN: 0") < 0) {
-            Serial.println("[net] 4G: the modem's data service did not start");
-            return 0;
+        // "Received data waits until asked for" only takes effect while the data service is closed,
+        // so the service is closed, set up and opened once. After that each connection only opens
+        // a socket: closing and reopening the service every time left later connections silent.
+        bool serviceOpen = ask("AT+NETOPEN?", "OK", 2000).indexOf("+NETOPEN: 1") >= 0;
+        if (!cellServiceReady || !serviceOpen) {
+            if (serviceOpen) {
+                ask("AT+NETCLOSE", "+NETCLOSE:", 10000);
+            }
+            ask("AT+CIPRXGET=1", "OK", 2000);
+            if (ask("AT+NETOPEN", "+NETOPEN:", 15000).indexOf("+NETOPEN: 0") < 0) {
+                Serial.println("[net] 4G: the modem's data service did not start");
+                return 0;
+            }
+            cellServiceReady = true;
         }
         String cmd = String("AT+CIPOPEN=0,\"TCP\",\"") + host + "\"," + port;
         String reply = ask(cmd.c_str(), "+CIPOPEN: 0,", 30000);
@@ -389,7 +398,8 @@ public:
     }
 
     // HttpClient writes a request in many small pieces; they are sent as one, just before the reply
-    // is read, which saves a modem round trip per header line.
+    // is read, which saves a modem round trip per header line. (Sending each piece at once made
+    // the modem fail mid-handshake.) Over 4G each connection carries one request only, see api.cpp.
     size_t write(const uint8_t* buf, size_t size) override {
         if (!open) {
             return 0;
@@ -659,7 +669,9 @@ static SSLClient& cellClient() {
     if (!ready) {
         tls.setInsecure();
         tls.setHandshakeTimeout(30);   // seconds: every piece of the handshake is a modem round trip
-        tls.setTimeout(30000);         // milliseconds
+        // Per read, in ms. Kept short: HttpClient polls in loops, and at 30 s a single dead
+        // connection added up to minutes (the loop watchdog fired in "waiting for status").
+        tls.setTimeout(10000);
         ready = true;
     }
     return tls;
@@ -677,6 +689,7 @@ static bool cellDataActive() {
 }
 
 static bool cellDataUp() {
+    cellServiceReady = false;
     smsCommand("AT+NETCLOSE", 10000);
     smsCommand(String("AT+CGDCONT=1,\"IP\",\"") + SIM_APN + "\"", 3000);
     smsCommand("AT+CGACT=0,1", 15000);

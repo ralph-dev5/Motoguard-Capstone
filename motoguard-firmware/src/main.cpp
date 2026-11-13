@@ -54,7 +54,7 @@ static bool smsEverSent = false;
 #endif
 #ifndef PRESENCE_PING_INTERVAL_CELL_MS
 // On 4G mobile data: still twice inside the dashboard's 20 s presence window, at half the data.
-#define PRESENCE_PING_INTERVAL_CELL_MS 5000
+#define PRESENCE_PING_INTERVAL_CELL_MS 15000
 #endif
 static String pendingSmsNumber;
 static String pendingSmsText;

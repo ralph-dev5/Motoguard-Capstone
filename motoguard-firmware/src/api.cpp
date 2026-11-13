@@ -73,7 +73,9 @@ static int request(const char* path, const String& payload, unsigned long timeou
     // start of the next response.
     breadcrumb("http: reading body");
     text = status > 0 ? http.responseBody() : String();
-    if (!tls || status <= 0) {
+    // Over 4G a connection is never reused: the second request on one went unanswered every time,
+    // while a fresh connection's first request is reliable.
+    if (!tls || status <= 0 || netOnCellular()) {
         http.stop();
     }
     return status;
