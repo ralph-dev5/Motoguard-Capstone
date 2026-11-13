@@ -214,6 +214,7 @@ static float rumble = 0;                            // averaged sample-to-sample
 // Handling jitter: like rumble, but each sample capped low, so a single hard hit (jerk 20-50)
 // adds almost nothing while a hand or rolling wheels (0.3-0.6 every sample) fill it up.
 static float jitter = 0;
+static bool handling = false;
 #define JITTER_SMOOTHING 0.1f
 #define JITTER_SAMPLE_CAP 0.6f
 
@@ -372,6 +373,7 @@ static void mpuRecalibrate() {
     shoveX = shoveY = shoveZ = 0;
     rumble = 0;
     jitter = 0;
+    handling = false;
     tiltCount = 0;
     steepTiltCount = 0;
 
@@ -429,7 +431,16 @@ static void mpuSample(MotionSample& out) {
     out.rumble = rumble;
 
     out.jitter = jitter;
-    out.handled = jitter > MOTION_HANDLING_JITTER;
+    // Hysteresis: a gentle lift or a hand holding the unit hovers right at the handling level
+    // (measured 0.18-0.44 while lifted), so a single cut-off flickered on and off and every flicker
+    // restarted the continuous-handling run - a lift held for 6 s never became a theft attempt.
+    // Once handled, it stays handled until the jitter is back down near parked noise.
+    if (jitter > MOTION_HANDLING_JITTER) {
+        handling = true;
+    } else if (jitter < MOTION_HANDLING_RELEASE_JITTER) {
+        handling = false;
+    }
+    out.handled = handling;
     // Pushing always vibrates: a shove with no jitter behind it is a tap's leftover offset.
     out.moving = jitter > thresholdPushRumble() || (out.shove > thresholdPushAccel() && out.handled);
     // A touch, bump or the first instant of a lift shows up as a jump between two samples.

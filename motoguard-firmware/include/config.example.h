@@ -125,6 +125,7 @@
 #define THREAT_RUN_GAP_MS 500              // a pause longer than this breaks the run; taps 1 s apart never add up
 #define MOTION_HANDLING_JITTER 0.20f       // m/s^2 spike-capped jitter that means "being handled". Measured: parked 0.05-0.12,
                                            // held or pushed 0.4-0.65, a hard tap's tail under 0.2 within 0.5 s
+#define MOTION_HANDLING_RELEASE_JITTER 0.16f  // once handled, stays handled until jitter drops below this. Measured parked: up to 0.14
 #define MOTION_PUSH_ACCEL 0.30f            // m/s^2: shown by calibration. Measured: parked 0.00-0.02, slow slide 0.49
 #define MOTION_PUSH_RUMBLE 0.30f           // m/s^2: shown by calibration. Measured: parked 0.05-0.08, slow slide 0.50-0.78
 #define THREAT_THEFT_TILT_DEG 15.0f        // tilt reported with the alert as evidence
