@@ -253,7 +253,22 @@ void netBegin() {
             onBackup = true;
         }
     }
-    if (!connected) {
+    // A WiFi is already saved but not in reach (router off, or riding away on battery): don't park
+    // on the setup page. It blocked the alarm and 4G for a minute on every power-up; mobile data
+    // takes over at once instead, and WiFi is retried in the background. BOOT still opens setup.
+    bool skipPortal = !connected && !button && primarySsid.length() > 0;
+    if (skipPortal) {
+        Serial.println("[net] Saved WiFi not in reach - skipping the setup page, 4G mobile data takes over");
+        disconnectedSinceMs = millis() - CELL_FALLBACK_MS;   // fallback is due now, not in 20 s
+        if (disconnectedSinceMs == 0) {
+            disconnectedSinceMs = 1;   // 0 means "connected"
+        }
+        lastSwitchMs = millis();
+        WiFi.persistent(false);
+        WiFi.begin(primarySsid.c_str(), primaryPass.c_str());   // keeps trying while on 4G
+        WiFi.persistent(true);
+    }
+    if (!connected && !skipPortal) {
         stopJoining();
         connected = button
             ? wm.startConfigPortal(SETUP_AP_NAME, SETUP_AP_PASS)
@@ -315,6 +330,7 @@ static bool wifiEnsureConnected() {
         }
         noWifiUntilMs = 0;
         Serial.println("[test] WiFi allowed again");
+        lastSwitchMs = now;   // a full window to rejoin, not an instant "could not join"
         WiFi.reconnect();
     }
     if (WiFi.status() == WL_CONNECTED) {
@@ -367,6 +383,7 @@ public:
     int connect(const char* host, uint16_t port) override {
         breadcrumb("4g: tcp connect");
         stop();
+        connectStartMs = millis();
         ask("AT+CIPCLOSE=0", "+CIPCLOSE: 0,", 3000);   // left open by a previous session
         // "Received data waits until asked for" only takes effect while the data service is closed,
         // so the service is closed, set up and opened once. After that each connection only opens
@@ -386,6 +403,7 @@ public:
         String cmd = String("AT+CIPOPEN=0,\"TCP\",\"") + host + "\"," + port;
         String reply = ask(cmd.c_str(), "+CIPOPEN: 0,", 30000);
         open = reply.indexOf("+CIPOPEN: 0,0") >= 0;
+        openedMs = millis();
         replyDeadlineMs = millis() + CELL_REPLY_TIMEOUT_MS;
         if (!open) {
             Serial.printf("[net] 4G: could not open %s:%u\n", host, port);
@@ -447,12 +465,17 @@ public:
     void stop() override {
         if (sentBytes > 0 || gotBytes > 0) {
             // One line per connection: shows whether the server answered at all.
-            Serial.printf("[4g] connection closed: sent %u B, received %u B\n", sentBytes, gotBytes);
+            // Timings, all counted from connect(): socket open, first reply byte, whole connection.
+            Serial.printf("[4g] connection closed: sent %u B, received %u B; open %lu ms, first byte %lu ms, total %lu ms, %u modem reads\n",
+                          sentBytes, gotBytes, openedMs - connectStartMs,
+                          firstByteMs ? firstByteMs - connectStartMs : 0UL, millis() - connectStartMs, fetchCount);
         }
         if (sentBytes > 0) {
             cellSilentConnections = gotBytes > 0 ? 0 : cellSilentConnections + 1;
         }
         sentBytes = gotBytes = 0;
+        firstByteMs = 0;
+        fetchCount = 0;
         if (open) {
             ask("AT+CIPCLOSE=0", "+CIPCLOSE: 0,", 5000);
         }
@@ -569,6 +592,7 @@ private:
             return;
         }
         lastFetchMs = millis();
+        fetchCount++;
         String len = ask("AT+CIPRXGET=4,0", "OK", 2000);
         int at = len.indexOf("+CIPRXGET: 4,0,");
         int waiting = at >= 0 ? len.substring(at + 15).toInt() : 0;
@@ -638,6 +662,9 @@ private:
             int c = line.read();
             if (c >= 0) {
                 rx.push_back((uint8_t) c);
+                if (firstByteMs == 0) {
+                    firstByteMs = millis();
+                }
                 got++;
                 gotBytes++;
                 replyDeadlineMs = millis() + CELL_REPLY_TIMEOUT_MS;
@@ -655,6 +682,10 @@ private:
     unsigned sentBytes = 0;
     unsigned gotBytes = 0;
     unsigned long replyDeadlineMs = 0;   // see fetch()
+    unsigned long connectStartMs = 0;
+    unsigned long openedMs = 0;
+    unsigned long firstByteMs = 0;
+    unsigned fetchCount = 0;
 };
 
 static CellTcpClient& cellTcp() {
@@ -662,9 +693,28 @@ static CellTcpClient& cellTcp() {
     return tcp;
 }
 
+// SSLClient uses one timeout for both the handshake and every read, and a read waits that long
+// whenever nothing has arrived. On a kept-open connection connected() and available() are called
+// while the line is idle (HttpClient checks the connection and clears leftovers before each
+// request), so each cost the full 10 s: 20 s per request. Once connected, reads wait only briefly;
+// every caller already loops with its own deadline.
+#define CELL_TLS_IDLE_READ_MS 200
+
+class CellTlsClient : public SSLClient {
+public:
+    using SSLClient::SSLClient;
+    int connect(const char* host, uint16_t port) override {
+        int ok = SSLClient::connect(host, port);
+        if (ok) {
+            mbedtls_ssl_conf_read_timeout(&sslclient->ssl_conf, CELL_TLS_IDLE_READ_MS);
+        }
+        return ok;
+    }
+};
+
 // HTTPS over 4G: TLS on the ESP32 over the modem's TCP link. Certificates are not checked, as on WiFi.
 static SSLClient& cellClient() {
-    static SSLClient tls(&cellTcp());
+    static CellTlsClient tls(&cellTcp());
     static bool ready = false;
     if (!ready) {
         tls.setInsecure();
@@ -689,6 +739,8 @@ static bool cellDataActive() {
 }
 
 static bool cellDataUp() {
+    // A connection kept open from before is dead once the data link is refreshed.
+    cellClient().stop();
     cellServiceReady = false;
     smsCommand("AT+NETCLOSE", 10000);
     smsCommand(String("AT+CGDCONT=1,\"IP\",\"") + SIM_APN + "\"", 3000);

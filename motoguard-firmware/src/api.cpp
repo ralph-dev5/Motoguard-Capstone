@@ -23,6 +23,10 @@ static bool usesTls(const ServerSettings& server) {
 // by hand when the address changes; otherwise the next request would go down the old one.
 static String connectedTo;
 
+#ifndef CELL_KEEP_ALIVE
+#define CELL_KEEP_ALIVE 1   // 0: a fresh connection for every request over 4G (the old behaviour)
+#endif
+
 static Client& clientFor(const ServerSettings& server) {
     String key = server.host + ":" + String(server.port);
     if (key != connectedTo) {
@@ -33,14 +37,107 @@ static Client& clientFor(const ServerSettings& server) {
     return netClient(usesTls(server));
 }
 
-// One POST. Returns the HTTP status (zero or negative: the server was never reached) and the
-// response body in `text`. An empty payload sends no body.
-static int request(const char* path, const String& payload, unsigned long timeoutMs, String& text,
-                   bool withToken = true) {
+// One byte from the connection, waiting at most until `deadline`; -1 when it never came.
+static int readByte(Client& client, unsigned long deadline) {
+    while ((long) (millis() - deadline) < 0) {
+        if (client.available() > 0) {
+            int c = client.read();
+            if (c >= 0) {
+                return c;
+            }
+        }
+        if (!client.connected() && client.available() <= 0) {
+            return -1;
+        }
+        delay(1);
+    }
+    return -1;
+}
+
+// One line of a chunked body (a chunk size or the blank line after a chunk), without CR/LF.
+static bool readLine(Client& client, unsigned long deadline, String& line) {
+    line = "";
+    for (;;) {
+        int c = readByte(client, deadline);
+        if (c < 0) {
+            return false;
+        }
+        if (c == '\n') {
+            return true;
+        }
+        if (c != '\r' && line.length() < 32) {
+            line += (char) c;
+        }
+    }
+}
+
+// Reads the reply body and returns as soon as it is complete.
+// ArduinoHttpClient's responseBody() cannot see the end of a chunked body (the server sends one:
+// "Transfer-Encoding: chunked", no Content-Length), so it waited for the read timeout on every
+// request: 10 s of each 13 s request over 4G. Here the body is read straight off the connection:
+// exactly Content-Length bytes, or chunks up to the zero-length one that ends a chunked body.
+static String readBody(HttpClient& http, Client& client, unsigned long timeoutMs) {
+    long length = http.contentLength();   // also skips the rest of the headers
+    unsigned long deadline = millis() + timeoutMs;
+    String body;
+
+    if (length >= 0) {
+        body.reserve(length);
+        while ((long) body.length() < length) {
+            int c = readByte(client, deadline);
+            if (c < 0) {
+                break;
+            }
+            body += (char) c;
+        }
+        return body;
+    }
+
+    if (http.isResponseChunked()) {
+        String line;
+        while (readLine(client, deadline, line)) {
+            if (line.length() == 0) {
+                continue;   // the CR LF that closes the previous chunk
+            }
+            long size = strtol(line.c_str(), nullptr, 16);
+            if (size <= 0) {
+                readLine(client, deadline, line);   // the blank line after the last chunk
+                break;
+            }
+            for (long i = 0; i < size; i++) {
+                int c = readByte(client, deadline);
+                if (c < 0) {
+                    return body;
+                }
+                body += (char) c;
+            }
+        }
+        return body;
+    }
+
+    // Neither: the body runs until the server closes the connection.
+    for (;;) {
+        int c = readByte(client, deadline);
+        if (c < 0) {
+            return body;
+        }
+        body += (char) c;
+    }
+}
+
+// How long the last request took and whether it went down an already open connection; shown in
+// the [api] log line so 4G speed can be read straight off the serial log.
+static unsigned long lastRequestMs = 0;
+static bool lastRequestReused = false;
+
+// One POST on whatever connection the client has (opening one if needed).
+static int requestOnce(const char* path, const String& payload, unsigned long timeoutMs, String& text,
+                       bool withToken) {
     const ServerSettings& server = settingsServer();
     bool tls = usesTls(server);
 
-    HttpClient http(clientFor(server), server.host, server.port);
+    Client& client = clientFor(server);
+    HttpClient http(client, server.host, server.port);
     if (tls) {
         // A TLS handshake takes this chip a second or two - far too slow to repeat for every
         // ping - so the connection stays open between requests.
@@ -72,12 +169,34 @@ static int request(const char* path, const String& payload, unsigned long timeou
     // Always read the whole reply: on a kept-open connection leftovers would be taken for the
     // start of the next response.
     breadcrumb("http: reading body");
-    text = status > 0 ? http.responseBody() : String();
-    // Over 4G a connection is never reused: the second request on one went unanswered every time,
-    // while a fresh connection's first request is reliable.
-    if (!tls || status <= 0 || netOnCellular()) {
+    text = status > 0 ? readBody(http, client, timeoutMs) : String();
+    // The connection stays open for the next request (over 4G too: a fresh TLS handshake there costs
+    // ~2.5 s and ~5 KB of mobile data). Reuse over 4G used to fail because responseBody() left the
+    // end of a chunked reply unread, and the next request then read it as its own reply.
+    if (!tls || status <= 0 || (netOnCellular() && !CELL_KEEP_ALIVE)) {
         http.stop();
     }
+    return status;
+}
+
+// One POST. Returns the HTTP status (zero or negative: the server was never reached) and the
+// response body in `text`. An empty payload sends no body.
+// A request down a kept-open connection that fails is tried once more on a fresh one: the server
+// (or the mobile network) may have dropped the idle connection without the device noticing.
+static int request(const char* path, const String& payload, unsigned long timeoutMs, String& text,
+                   bool withToken = true) {
+    unsigned long start = millis();
+    Client& client = clientFor(settingsServer());
+    bool reused = usesTls(settingsServer()) && client.connected();
+    int status = requestOnce(path, payload, timeoutMs, text, withToken);
+    if (status <= 0 && reused) {
+        Serial.printf("[api] %s: kept-open connection failed (%d), retrying on a new one\n", path, status);
+        client.stop();
+        reused = false;
+        status = requestOnce(path, payload, timeoutMs, text, withToken);
+    }
+    lastRequestMs = millis() - start;
+    lastRequestReused = reused;
     return status;
 }
 
@@ -93,7 +212,8 @@ static int postJson(const char* path, JsonDocument& body, JsonDocument* response
     String text;
     int status = request(path, payload, 15000, text);
 
-    Serial.printf("[api] POST %s -> %d\n", path, status);
+    Serial.printf("[api] POST %s -> %d (%lu ms%s)\n", path, status, lastRequestMs,
+                  lastRequestReused ? ", same connection" : "");
     if (status <= 0) {
         const ServerSettings& server = settingsServer();
         Serial.printf("[api] Could not reach %s:%u\n", server.host.c_str(), server.port);
