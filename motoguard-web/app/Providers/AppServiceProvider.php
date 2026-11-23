@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Broadcasting\ResilientPusherBroadcaster;
+use App\Mail\BrevoTransport;
 use Carbon\CarbonImmutable;
 use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Database\Events\MigrationsEnded;
@@ -10,6 +11,7 @@ use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -30,6 +32,9 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureDefaults();
         $this->lockSupabaseDataApi();
+
+        // Mail goes out over Brevo's HTTPS API: Render's free plan blocks outgoing SMTP ports.
+        Mail::extend('brevo', fn (): BrevoTransport => new BrevoTransport((string) config('services.brevo.key')));
 
         // Reverb speaks the Pusher protocol; this is the stock driver, minus failing the request when it is down.
         Broadcast::extend('reverb', function ($app, array $config) {

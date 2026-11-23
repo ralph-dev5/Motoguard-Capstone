@@ -42,6 +42,15 @@ services:
         value: database
       - key: RUN_QUEUE_WORKER
         value: "false"
+      # Password reset / verification emails go through Brevo's HTTPS API (free plan blocks SMTP ports).
+      - key: MAIL_MAILER
+        value: brevo
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM_ADDRESS
+        sync: false
+      - key: MAIL_FROM_NAME
+        value: MotoGuard+
       - key: BROADCAST_CONNECTION
         value: reverb
       - key: REVERB_APP_ID
