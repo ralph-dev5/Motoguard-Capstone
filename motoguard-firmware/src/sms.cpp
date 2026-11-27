@@ -1,3 +1,5 @@
+#include <driver/gpio.h>
+
 #include "breadcrumb.h"
 #include "sms.h"
 
@@ -40,10 +42,23 @@ static String ask(const char* cmd, unsigned long waitMs = 1500) {
     return out;
 }
 
-// The modem line runs at SMS_MODEM_BAUD (115200, the A7670G's default). A slower speed set with
-// AT+IPR was tried and abandoned: the modem kept it across some restarts but not others, and the
-// two ends drifted apart. If the modem answers at another speed, it is moved back.
+// The modem line runs at SMS_MODEM_BAUD. The A7670G starts at 115200 out of the box and keeps an
+// AT+IPR speed across some restarts but not others, so whenever it stops answering it is looked
+// for at the other speeds and moved to this one again (relinkModem, from every status check).
 #define MODEM_LINK_BAUD SMS_MODEM_BAUD
+
+// A reply that came through the line whole: it ends in OK/ERROR and carries what was asked for.
+// A noisy line drops or flips characters, and one such reply must not read as "no SIM".
+static String askFor(const char* cmd, const char* expect, int tries = 3) {
+    String out;
+    for (int i = 0; i < tries; i++) {
+        out = ask(cmd);
+        if (out.indexOf(expect) >= 0 && (out.indexOf("OK") >= 0 || out.indexOf("ERROR") >= 0)) {
+            return out;
+        }
+    }
+    return out;
+}
 
 static bool modemAnswersAt(unsigned long baud) {
     sim.updateBaudRate(baud);
@@ -59,14 +74,23 @@ static bool modemAnswersAt(unsigned long baud) {
 // Not answering at MODEM_LINK_BAUD: look for the modem at the other speeds it may be set to, and
 // move it back. True when it answers at MODEM_LINK_BAUD afterwards.
 static bool relinkModem() {
-    static const unsigned long others[] = {57600, 9600, 38400, 19200};
+    static const unsigned long others[] = {115200, 57600, 38400, 19200, 9600};
     for (unsigned long baud : others) {
         if (baud == MODEM_LINK_BAUD || !modemAnswersAt(baud)) {
             continue;
         }
-        sim.println("AT+IPR=" + String(MODEM_LINK_BAUD));
+        // AT+IPREX stores the speed in the modem, so it comes back at it after a restart (a supply
+        // dip while sending 4G data restarts it); AT+IPR alone is forgotten by the next restart.
+        sim.println("AT+IPREX=" + String(MODEM_LINK_BAUD));
         sim.flush();
         delay(200);
+        if (!modemAnswersAt(MODEM_LINK_BAUD)) {
+            sim.updateBaudRate(baud);
+            delay(50);
+            sim.println("AT+IPR=" + String(MODEM_LINK_BAUD));
+            sim.flush();
+            delay(200);
+        }
         if (modemAnswersAt(MODEM_LINK_BAUD)) {
             Serial.printf("[sms] A7670G was at %lu baud - moved back to %d\n", baud, MODEM_LINK_BAUD);
             return true;
@@ -88,12 +112,11 @@ static void refresh(bool verbose) {
         Serial.println("[sms] A7670G restarted - setting it up again");
     }
     if (!answering) {
-        // A modem that restarted is back at its factory 115200: move it to the slow line again.
+        // A modem that restarted is back at its factory 115200: move it to the slow line again,
+        // then set it up again below like any other restart (LTE only above all).
         if (relinkModem()) {
             answering = true;
-            ask("ATE0");
-            ask("AT+CMGF=1");
-            ask("AT+CMEE=2");
+            restarted = true;
         }
     }
     if (!answering) {
@@ -115,17 +138,19 @@ static void refresh(bool verbose) {
         ask("AT+CNMP=38");
     }
 
-    simReady = ask("AT+CPIN?").indexOf("READY") >= 0;
+    simReady = askFor("AT+CPIN?", "+CPIN:").indexOf("READY") >= 0;
 
-    String reg = ask("AT+CREG?");
-    registered = reg.indexOf(",1") >= 0 || reg.indexOf(",5") >= 0;   // home network or roaming
+    // Home network or roaming; 6 and 7 are the same for "SMS only", which is how LTE often reports.
+    auto onNetwork = [](const String& r) {
+        return r.indexOf(",1") >= 0 || r.indexOf(",5") >= 0 || r.indexOf(",6") >= 0 || r.indexOf(",7") >= 0;
+    };
+    registered = onNetwork(askFor("AT+CREG?", "+CREG:"));
     if (!registered) {
         // On 4G the A7670G can be attached over LTE while the 2G/3G register still reads 0.
-        String lte = ask("AT+CEREG?");
-        registered = lte.indexOf(",1") >= 0 || lte.indexOf(",5") >= 0;
+        registered = onNetwork(askFor("AT+CEREG?", "+CEREG:"));
     }
 
-    String csq = ask("AT+CSQ");
+    String csq = askFor("AT+CSQ", "+CSQ:");
     int at = csq.indexOf("+CSQ: ");
     signalQuality = at >= 0 ? csq.substring(at + 6).toInt() : -1;
 
@@ -143,7 +168,12 @@ static void refresh(bool verbose) {
 }
 
 void smsBegin() {
+    // Room for a whole 4G read (TLS certificates arrive in KB-sized pieces) while the loop is busy.
+    sim.setRxBufferSize(4096);
     sim.begin(MODEM_LINK_BAUD, SERIAL_8N1, PIN_MODEM_RX, PIN_MODEM_TX);
+    // The modem's TX high is only just above what the ESP32 reads as 1; a dip read as 0 garbles
+    // replies (most bad characters had a 1 bit turned to 0). The pull-up holds the line high.
+    gpio_pullup_en((gpio_num_t) PIN_MODEM_RX);
     delay(300);
     if (!modemAnswersAt(MODEM_LINK_BAUD)) {
         relinkModem();   // left at another speed by an earlier firmware
@@ -175,6 +205,11 @@ static String failureReason(const String& reply, const char* fallback) {
 
 bool smsReady() {
     return answering && simReady && registered;
+}
+
+void smsRecheck() {
+    refresh(false);
+    lastRefreshMs = millis();
 }
 
 String smsCommand(const String& cmd, unsigned long waitMs) {
@@ -289,6 +324,7 @@ bool smsSend(const String& number, const String& message) {
 void smsBegin() {}
 void smsUpdate(unsigned long) {}
 bool smsReady() { return false; }
+void smsRecheck() {}
 bool smsSend(const String&, const String&) { return false; }
 String smsCommand(const String&, unsigned long) { return "(the mobile-data build has no direct modem line)"; }
 String smsListen(const String&, unsigned long) { return "(the mobile-data build has no direct modem line)"; }

@@ -170,8 +170,9 @@
 #define LOCATION_INTERVAL_MOVING_MS 10000
 #define LOCATION_INTERVAL_PARKED_MS 120000
 #define SMS_COOLDOWN_MS 120000
-// WiFi build: the A7670G is used for texts only. It talks at 115200 out of the box.
-#define SMS_MODEM_BAUD 115200
+// The ESP32 <-> A7670G line. The modem starts at 115200; it is moved to this slower speed, which
+// a breadboard line carries without garbled replies (at 115200 noise broke 4G data and TLS).
+#define SMS_MODEM_BAUD 57600
 #define SMS_STATUS_INTERVAL_MS 30000   // how often the modem's SIM/network status is re-read
 // A theft text that fails is retried, since a weak signal drops the modem off the network briefly.
 #define SMS_RETRY_INTERVAL_MS 20000    // gap between tries

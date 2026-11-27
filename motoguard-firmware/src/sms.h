@@ -13,6 +13,8 @@ Stream& smsSerial();
 void smsUpdate(unsigned long now);
 // True when a text can go out right now: modem answering, SIM ready, registered on the network.
 bool smsReady();
+// Checks the modem now (not at the next status check): finds it again after a restart.
+void smsRecheck();
 // Blocks while the network accepts the message (a few seconds, up to about 30).
 bool smsSend(const String& number, const String& message);
 // Bench tests: one raw AT command and its reply, and a readout of SIM, network, signal and supply.

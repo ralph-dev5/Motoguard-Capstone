@@ -24,6 +24,17 @@
 #ifndef CELL_RETRY_MS
 #define CELL_RETRY_MS 30000      // gap between attempts to start mobile data
 #endif
+// While 4G carries the data, WiFi is looked for less often and sent at lower power: each scan is a
+// burst of radio current on the same supply as the modem's LTE bursts, and together they dip it
+// enough to restart the modem.
+#define WIFI_SWITCH_ON_CELL_MS 120000
+
+static bool onCell = false;
+
+static void setOnCell(bool on) {
+    onCell = on;
+    WiFi.setTxPower(on ? WIFI_POWER_11dBm : WIFI_POWER_19_5dBm);
+}
 
 static WiFiClient client;
 // For the online server. Certificates are not checked (setInsecure): the link is encrypted, and
@@ -42,9 +53,48 @@ static unsigned long lastSwitchMs = 0;
 
 static String looseName(const String& ssid);
 
-// The usual network is kept in its own preferences entry. The WiFi driver's stored network is
-// not reliable for it: the setup library re-saves whatever network was joined last, which once
-// turned the phone hotspot into the "usual" network and lost the home WiFi.
+// Every network joined through the setup page is remembered (up to KNOWN_MAX, newest first), so
+// moving between home, school and elsewhere needs no BOOT press: the device joins whichever
+// remembered network is in reach. "The usual network" (primarySsid) is the one picked right now.
+// Kept in their own preferences entries. The WiFi driver's stored network is not reliable for it:
+// the setup library re-saves whatever network was joined last, which once turned the phone hotspot
+// into the "usual" network and lost the home WiFi.
+#define KNOWN_MAX 5
+static String knownSsid[KNOWN_MAX], knownPass[KNOWN_MAX];
+static int knownCount = 0;
+
+static void saveKnown() {
+    Preferences prefs;
+    prefs.begin("net", false);
+    prefs.putUChar("kn", knownCount);
+    for (int i = 0; i < knownCount; i++) {
+        prefs.putString(("ks" + String(i)).c_str(), knownSsid[i]);
+        prefs.putString(("kp" + String(i)).c_str(), knownPass[i]);
+    }
+    prefs.end();
+}
+
+// Puts a network at the front of the remembered list (moving it up if it is already there).
+static void rememberNetwork(const String& ssid, const String& pass) {
+    int at = knownCount < KNOWN_MAX ? knownCount : KNOWN_MAX - 1;   // full: the oldest goes
+    for (int i = 0; i < knownCount; i++) {
+        if (knownSsid[i] == ssid) {
+            at = i;
+            break;
+        }
+    }
+    if (at == knownCount) {
+        knownCount++;
+    }
+    for (int i = at; i > 0; i--) {
+        knownSsid[i] = knownSsid[i - 1];
+        knownPass[i] = knownPass[i - 1];
+    }
+    knownSsid[0] = ssid;
+    knownPass[0] = pass;
+    saveKnown();
+}
+
 static void savePrimary(const String& ssid, const String& pass) {
     if (ssid.length() == 0 || (backupSsid.length() > 0 && looseName(ssid) == looseName(backupSsid))) {
         return;
@@ -56,6 +106,35 @@ static void savePrimary(const String& ssid, const String& pass) {
     prefs.putString("priSsid", ssid);
     prefs.putString("priPass", pass);
     prefs.end();
+    rememberNetwork(ssid, pass);
+}
+
+// Scans and makes the strongest remembered network in reach the usual one. False when none is.
+static bool pickKnownNearby() {
+    if (knownCount == 0) {
+        return false;
+    }
+    int count = WiFi.scanNetworks();
+    int best = -1, bestRssi = -1000;
+    for (int i = 0; i < count; i++) {
+        for (int k = 0; k < knownCount; k++) {
+            if (WiFi.SSID(i) == knownSsid[k] && WiFi.RSSI(i) > bestRssi) {
+                best = k;
+                bestRssi = WiFi.RSSI(i);
+            }
+        }
+    }
+    WiFi.scanDelete();
+    if (best < 0) {
+        Serial.printf("[net] None of the %d remembered WiFi networks is in reach\n", knownCount);
+        return false;
+    }
+    if (knownSsid[best] != primarySsid) {
+        Serial.printf("[net] Remembered WiFi \"%s\" is in reach (%d dBm) - using it\n", knownSsid[best].c_str(), bestRssi);
+    }
+    primarySsid = knownSsid[best];
+    primaryPass = knownPass[best];
+    return true;
 }
 
 static void loadNetworks() {
@@ -65,7 +144,16 @@ static void loadNetworks() {
     backupPass = prefs.getString("bkPass", "");
     primarySsid = prefs.getString("priSsid", "");
     primaryPass = prefs.getString("priPass", "");
+    knownCount = min((int) prefs.getUChar("kn", 0), KNOWN_MAX);
+    for (int i = 0; i < knownCount; i++) {
+        knownSsid[i] = prefs.getString(("ks" + String(i)).c_str(), "");
+        knownPass[i] = prefs.getString(("kp" + String(i)).c_str(), "");
+    }
     prefs.end();
+    // From before networks were remembered: the usual one starts the list.
+    if (knownCount == 0 && primarySsid.length() > 0) {
+        rememberNetwork(primarySsid, primaryPass);
+    }
 
     // First start with this firmware: take the network the setup page saved in the driver,
     // unless that is the phone hotspot.
@@ -247,6 +335,7 @@ void netBegin() {
     // Usual WiFi first, then the owner's phone hotspot, and only then the setup page: an owner
     // riding away from home should never land on a setup portal.
     if (!button) {
+        pickKnownNearby();   // whichever remembered network is here; else the last one is tried
         connected = joinNetwork(primarySsid, primaryPass, 15000, false);
         if (!connected && joinNetwork(backupSsid, backupPass, 10000)) {
             connected = true;
@@ -346,7 +435,7 @@ static bool wifiEnsureConnected() {
 
     // Still offline after a while: the network is probably out of range (riding away from home,
     // or back home with the phone hotspot off), so try the other one.
-    if (now - lastSwitchMs >= WIFI_SWITCH_MS) {
+    if (now - lastSwitchMs >= (onCell ? WIFI_SWITCH_ON_CELL_MS : WIFI_SWITCH_MS)) {
         Serial.printf("[net] Could not join %s: %s\n", onBackup ? "the phone hotspot" : "the usual WiFi", joinFailure());
         lastSwitchMs = now;
         if (!netSwitchNetwork()) {
@@ -394,7 +483,11 @@ public:
                 ask("AT+NETCLOSE", "+NETCLOSE:", 10000);
             }
             ask("AT+CIPRXGET=1", "OK", 2000);
-            if (ask("AT+NETOPEN", "+NETOPEN:", 15000).indexOf("+NETOPEN: 0") < 0) {
+            String opened = ask("AT+NETOPEN", "+NETOPEN:", 15000);
+            // The reply may have come through garbled: ask the modem whether the service is open.
+            if (opened.indexOf("+NETOPEN: 0") < 0
+                && ask("AT+NETOPEN?", "OK", 2000).indexOf("+NETOPEN: 1") < 0
+                && ask("AT+NETOPEN?", "OK", 2000).indexOf("+NETOPEN: 1") < 0) {
                 Serial.println("[net] 4G: the modem's data service did not start");
                 return 0;
             }
@@ -727,7 +820,6 @@ static SSLClient& cellClient() {
     return tls;
 }
 
-static bool onCell = false;
 static unsigned long lastCellTryMs = 0;
 
 // Data uses the LTE data context (1). A context the modem has held for hours can open TCP
@@ -735,10 +827,23 @@ static unsigned long lastCellTryMs = 0;
 // the network) cures that. TinyGSM's gprsConnect is not used: it detaches from LTE entirely
 // (AT+CGATT=0), which takes the modem off the network for a while.
 static bool cellDataActive() {
-    return smsCommand("AT+CGACT?", 3000).indexOf("+CGACT: 1,1") >= 0;
+    // A garbled reply (noise on the line) is asked again rather than taken as "data dropped".
+    String reply;
+    for (int i = 0; i < 3; i++) {
+        reply = smsCommand("AT+CGACT?", 3000);
+        if (reply.indexOf("+CGACT: 1,1") >= 0) {
+            return true;
+        }
+        if (reply.indexOf("+CGACT: 1,0") >= 0) {
+            return false;
+        }
+    }
+    return false;
 }
 
 static bool cellDataUp() {
+    // The modem may have just restarted (and be back at its factory line speed): find it first.
+    smsRecheck();
     // A connection kept open from before is dead once the data link is refreshed.
     cellClient().stop();
     cellServiceReady = false;
@@ -772,7 +877,7 @@ static bool cellEnsureConnected() {
         }
         Serial.println("[net] 4G mobile data dropped");
         cellClient().stop();
-        onCell = false;
+        setOnCell(false);
     }
 
     // Give the WiFi a while first, so a short dropout at home doesn't start using mobile data.
@@ -796,7 +901,7 @@ static bool cellEnsureConnected() {
     }
     secureClient.stop();
     client.stop();
-    onCell = true;
+    setOnCell(true);
     Serial.println("[net] On 4G mobile data until WiFi is back");
     return true;
 }
@@ -814,7 +919,7 @@ bool netEnsureConnected() {
             // WiFi is free and faster: hand back, and close the modem's connection.
             Serial.println("[net] WiFi is back - 4G mobile data off");
             cellClient().stop();
-            onCell = false;
+            setOnCell(false);
             lastCellTryMs = 0;
         }
         return true;
@@ -824,7 +929,18 @@ bool netEnsureConnected() {
 
 bool netSwitchNetwork() {
     if (backupSsid.length() == 0) {
-        return false;
+        // No phone hotspot: look for another remembered network instead.
+        String was = primarySsid;
+        if (!pickKnownNearby() || primarySsid == was) {
+            return false;
+        }
+        stopJoining();
+        Serial.printf("[net] Trying remembered WiFi \"%s\"\n", primarySsid.c_str());
+        WiFi.persistent(false);
+        WiFi.begin(primarySsid.c_str(), primaryPass.c_str());
+        WiFi.persistent(true);
+        lastSwitchMs = millis();
+        return true;
     }
     // With no usual network saved, the hotspot is the only other choice.
     bool wasOnBackup = onBackup;
@@ -839,6 +955,9 @@ bool netSwitchNetwork() {
         }
     }
     stopJoining();
+    if (!onBackup) {
+        pickKnownNearby();   // the remembered network that is here now, not just the last one
+    }
     String ssid = onBackup ? nearbyName(backupSsid) : primarySsid;
     Serial.printf("[net] Trying %s \"%s\"\n", onBackup ? "phone hotspot" : "usual WiFi", ssid.c_str());
     WiFi.persistent(false);
